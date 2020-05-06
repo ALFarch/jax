@@ -526,20 +526,17 @@ def _xla_call_impl(fun: lu.WrappedFun, *args, device, backend, name):
           "Calling the de-optimized version.")
     return fun.call_wrapped(*args)  # probably won't return
 
+@lu.cache
 def _xla_callable(fun: lu.WrappedFun, device, backend, name, *arg_specs):
   if device is not None and backend is not None:
     raise ValueError("can't specify both a device and a backend for jit, "
                      "got device={} and backend={}".format(device, backend))
 
   abstract_args, arg_devices = unzip2(arg_specs)
-  # pvals: Sequence[pe.PartialVal] = [pe.PartialVal.unknown(aval) for aval in abstract_args]
-
-  # jaxpr, pvals, consts = pe.trace_to_jaxpr(
-  #     fun, pvals, instantiate=False, stage_out=True, bottom=True)
-
   jaxpr, out_avals, consts = pe.trace_to_jaxpr2(fun, abstract_args)
   print(jaxpr)
-
+  if any(isinstance(c, core.Tracer) for c in consts):
+    raise core.UnexpectedTracerError("Encountered an unexpected tracer.")
   _map(prefetch, it.chain(consts, jaxpr_literals(jaxpr)))
 
   nreps = jaxpr_replicas(jaxpr)
@@ -670,9 +667,6 @@ def _get_device(device, backend):
   out, = compiled.local_devices()
   return out
 
-# this is basically a new call_bind, only difference from regular bind right now
-# is that (1) we call process_call and (2) we always assume multiple outputs.
-# ...actually we also have process_env_traces!
 def xla_call(fun, *args, **params):
   params_tuple = tuple(params.items())
   top_trace = core.find_top_trace(args)
@@ -680,6 +674,8 @@ def xla_call(fun, *args, **params):
     fun, env_trace_todo = process_env_traces2(fun, params_tuple)
     with core.new_sublevel():
       if not core.trace_state.trace_stack.stagers:
+        if any(isinstance(x, core.Tracer) for x in args):
+          raise core.UnexpectedTracerError("Encountered an unexpected tracer.")
         outs = _xla_call_impl(fun, *args, **params)
       else:
         trace = core.trace_state.trace_stack.stagers[-1]
@@ -1120,7 +1116,8 @@ def _device_put_impl(x, device: Optional[Device] = None):
 
 device_put_p = core.Primitive('device_put')
 device_put_p.def_impl(_device_put_impl)
-pe.custom_partial_eval_rules[device_put_p] = lambda trace, x, **params: x
+device_put_p.def_abstract_eval(lambda x, device=None: x)
+translations[device_put_p] = lambda c, x, device=None: x
 ad.deflinear(device_put_p, lambda cotangent, **kwargs: [cotangent])
 masking.defvectorized(device_put_p)
 

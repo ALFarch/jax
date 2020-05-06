@@ -171,7 +171,7 @@ class Literal(object):
       if type(val) in literalable_types:
         try:
           self.hash = hash((val.item(), val.dtype))
-        except (TypeError, AttributeError):
+        except (TypeError, AttributeError, ValueError):
           self.hash = None
 
   @property
@@ -185,10 +185,10 @@ class Literal(object):
     assert False
 
   def __repr__(self):
-    try:
-      return 'Literal(val={})'.format(self.val)
-    except AttributeError:
+    if hasattr(self, 'hash'):
       return '{}'.format(self.val)
+    else:
+      return 'Literal(val={})'.format(self.val)
 
 literalable_types: Set[type] = set()
 
@@ -1098,8 +1098,7 @@ def check_jaxpr(jaxpr: Jaxpr):
 
 
 def pp_vars(vs) -> str:
-  # return ' '.join(f'{v}:{v.aval.str_short()}' for v in vs)
-  return ' '.join(map(str, vs))
+    return ' '.join(map(str, vs))
 
 def pp_eqn_compact(primitive_name: str, params: Dict) -> PrettyPrint:
   filtered_params = {k: v for k, v in params.items()
@@ -1115,10 +1114,9 @@ def pp_eqn(eqn: JaxprEqn) -> PrettyPrint:
 
 
 def pp_jaxpr(jaxpr) -> PrettyPrint:
-  pp_constvars = pp_vars(jaxpr.constvars)
-  pp_invars = pp_vars(jaxpr.invars)
-  pp_outvars = pp_vars(jaxpr.outvars)
-  return (pp('{{ lambda {} ; {}.'.format(pp_constvars, pp_invars)) +
+  pp_outvars = str(tuple(jaxpr.outvars))
+  return (pp('{{ lambda {} ; {}.'.format(pp_vars(jaxpr.constvars),
+                                         pp_vars(jaxpr.invars))) +
           ((pp('let ') >>
             vcat(map(pp_eqn, jaxpr.eqns))) +
-           pp('in ({}) }}'.format(pp_outvars))).indent(2))
+           pp('in {} }}'.format(pp_outvars))).indent(2))

@@ -807,8 +807,10 @@ class JaxprTrace2(Trace):
     pass
 
   def pure(self, val):
-    return JaxprTracer2(self, raise_to_shaped(get_aval(val)),
-                        ConstVar(val))
+    if isinstance(val, Tracer):
+      return JaxprTracer2(self, raise_to_shaped(get_aval(val)), ConstVar(val))
+    else:
+      return JaxprTracer2(self, raise_to_shaped(get_aval(val)), Literal(val))
 
   def new_arg(self, aval):
     return JaxprTracer2(self, aval, LambdaBinding())
@@ -881,6 +883,8 @@ def tracers_to_jaxpr2(in_tracers, out_tracers):
     elif isinstance(recipe, ConstVar):
       v = t_to_var[id(t)] = getconstvar(recipe.val)
       consts[v] = recipe.val
+    elif isinstance(recipe, Literal):
+      t_to_var[id(t)] = recipe
     elif recipe is unit:
       t_to_var[id(t)] = unitvar
     else:
@@ -897,11 +901,13 @@ def trace_to_jaxpr2(fun: lu.WrappedFun,
   trace_stack = core.trace_state.trace_stack
   trace = JaxprTrace2()
   core.trace_state.trace_stack.stagers.append(trace)
-  in_tracers = map(trace.new_arg, in_avals)
-  ans = fun.call_wrapped(*in_tracers)
-  out_tracers = map(trace.full_raise, ans)
-  jaxpr, consts = tracers_to_jaxpr2(in_tracers, out_tracers)
-  out_avals = [t.aval for t in out_tracers]
-  trace_ = core.trace_state.trace_stack.stagers.pop()
-  assert trace is trace_
+  try:
+    in_tracers = map(trace.new_arg, in_avals)
+    ans = fun.call_wrapped(*in_tracers)
+    out_tracers = map(trace.full_raise, ans)
+    jaxpr, consts = tracers_to_jaxpr2(in_tracers, out_tracers)
+    out_avals = [t.aval for t in out_tracers]
+  finally:
+    trace_ = core.trace_state.trace_stack.stagers.pop()
+    assert trace is trace_
   return jaxpr, out_avals, consts
