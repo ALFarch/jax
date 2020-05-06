@@ -185,9 +185,9 @@ class Literal(object):
     assert False
 
   def __repr__(self):
-    if self.hash is None:
+    try:
       return 'Literal(val={})'.format(self.val)
-    else:
+    except AttributeError:
       return '{}'.format(self.val)
 
 literalable_types: Set[type] = set()
@@ -208,14 +208,19 @@ class Primitive(object):
                               or valid_jaxtype(arg) for arg in args), args
     top_trace = find_top_trace(args)
     if top_trace is None:
-      return self.impl(*args, **kwargs)
-
-    tracers = map(top_trace.full_raise, args)
-    out_tracer = top_trace.process_primitive(self, tracers, kwargs)
-    if self.multiple_results:
-      return map(full_lower, out_tracer)
+      if not trace_state.trace_stack.stagers:
+        return self.impl(*args, **kwargs)
+      else:
+        trace = trace_state.trace_stack.stagers[-1]
+        tracers = map(trace.full_raise, args)
+        return trace.process_primitive(self, tracers, kwargs)
     else:
-      return full_lower(out_tracer)
+      tracers = map(top_trace.full_raise, args)
+      out_tracer = top_trace.process_primitive(self, tracers, kwargs)
+      if self.multiple_results:
+        return map(full_lower, out_tracer)
+      else:
+        return full_lower(out_tracer)
 
   def def_impl(self, impl):
     self.impl = impl
@@ -300,7 +305,7 @@ class Trace:
     self.sublevel = sublevel
 
   def full_raise(self, val) -> 'Tracer':
-    if not isinstance(val, Tracer):
+    if not isinstance(val, Tracer) or isinstance(val, OmniTracer):
       return self.pure(val)
     level = self.level
     sublevel = self.sublevel
@@ -491,6 +496,8 @@ class Tracer(object):
 aval_property = namedtuple("aval_property", ["fget"])
 aval_method = namedtuple("aval_method", ["fun"])
 
+class OmniTracer: pass
+
 
 class MasterTrace:
   level: int
@@ -513,10 +520,12 @@ class MasterTrace:
 class TraceStack:
   upward: List[MasterTrace]
   downward: List[MasterTrace]
+  stagers: List
 
   def __init__(self):
     self.upward = []
     self.downward = []
+    self.stagers = []
 
   def next_level(self, bottom: bool) -> int:
     if bottom:
@@ -537,14 +546,16 @@ class TraceStack:
       self.upward.pop()
 
   def __repr__(self) -> str:
-    return  'Trace stack\n{} ---\n{}'.format(
+    return  'Trace stack\n{}\n{}\n{}'.format(
       map('  {}\n'.format, self.upward[::-1]),
-      map('  {}\n'.format, self.downward))
+      map('  {}\n'.format, self.downward),
+      map('  {}\n'.format, self.stagers))
 
   def copy(self):
     new = TraceStack()
     new.upward = self.upward[:]
     new.downward = self.downward[:]
+    new.stagers = self.stagers[:]
     return new
 
 class Sublevel(int): pass
@@ -625,7 +636,8 @@ def full_lower(val):
 
 def find_top_trace(xs):
  try:
-   top_trace = max((x._trace for x in xs if isinstance(x, Tracer)),
+   top_trace = max((x._trace for x in xs if isinstance(x, Tracer)
+                    if hasattr(x._trace, 'level') and x._trace.level >= 0),
                    key=attrgetter('level'))
  except ValueError:
    return None
@@ -670,6 +682,7 @@ class AbstractUnit(AbstractValue):
       assert other is abstract_unit, other
     return self
   def _eq(self, self_traced, other): return get_aval(other) is self
+  def str_short(self): return '*'
 
 abstract_unit = AbstractUnit()
 
@@ -868,7 +881,9 @@ class ShapedArray(UnshapedArray):
 
   def str_short(self):
     shapestr = ','.join(map(str, self.shape))
-    return '{}[{}]'.format(self.dtype.name, shapestr)
+    shapestr = '[{}]'.format(shapestr) if shapestr else ''
+    dtype = onp.dtype(self.dtype.name)
+    return '{}{}{}'.format(dtype.char, 8 * dtype.itemsize, shapestr)
 
   def __len__(self):
     try:
@@ -1082,7 +1097,7 @@ def check_jaxpr(jaxpr: Jaxpr):
 
 
 def pp_vars(vs) -> str:
-    return ' '.join(map(str, vs))
+  return ' '.join(f'{v}:{v.aval.str_short()}' for v in vs)
 
 def pp_eqn_compact(primitive_name: str, params: Dict) -> PrettyPrint:
   filtered_params = {k: v for k, v in params.items()
@@ -1098,9 +1113,10 @@ def pp_eqn(eqn: JaxprEqn) -> PrettyPrint:
 
 
 def pp_jaxpr(jaxpr) -> PrettyPrint:
-  pp_outvars = str(tuple(jaxpr.outvars))
-  return (pp('{{ lambda {} ; {}.'.format(pp_vars(jaxpr.constvars),
-                                         pp_vars(jaxpr.invars))) +
+  pp_constvars = pp_vars(jaxpr.constvars)
+  pp_invars = pp_vars(jaxpr.invars)
+  pp_outvars = pp_vars(jaxpr.outvars)
+  return (pp('{{ lambda {} ; {}.'.format(pp_constvars, pp_invars)) +
           ((pp('let ') >>
             vcat(map(pp_eqn, jaxpr.eqns))) +
-           pp('in {} }}'.format(pp_outvars))).indent(2))
+           pp('in ({}) }}'.format(pp_outvars))).indent(2))

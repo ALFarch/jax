@@ -34,7 +34,7 @@ from ..abstract_arrays import (ConcreteArray, ShapedArray, AbstractToken,
 from ..core import Literal, pp_eqn_compact
 from ..pprint_util import pp
 from ..util import (partial, partialmethod, cache, prod, unzip2, memoize,
-                    extend_name_stack, wrap_name)
+                    extend_name_stack, wrap_name, safe_map)
 from ..lib import xla_bridge as xb
 from ..lib import xla_client as xc
 from . import partial_eval as pe
@@ -374,14 +374,14 @@ def jaxpr_subcomp(c, jaxpr, backend, axis_env, consts, name_stack, *args):
 
   env = {}
   write(core.unitvar, _make_unit(c))
-  _map(write, jaxpr.constvars, consts)
-  _map(write, jaxpr.invars, args)
+  safe_map(write, jaxpr.constvars, consts)
+  safe_map(write, jaxpr.invars, args)
   for eqn in jaxpr.eqns:
     c.SetOpMetadata(xc.OpMetadata(
         op_type=eqn.primitive.name,
         op_name=str(pp(name_stack) >> pp_eqn_compact(
             eqn.primitive.name, eqn.params))))
-    in_nodes = list(map(read, eqn.invars))
+    in_nodes = safe_map(read, eqn.invars)
     if eqn.primitive in backend_specific_translations[platform]:
       rule = backend_specific_translations[platform][eqn.primitive]
       ans = rule(c, *in_nodes, **eqn.params)
@@ -391,7 +391,7 @@ def jaxpr_subcomp(c, jaxpr, backend, axis_env, consts, name_stack, *args):
       new_params = check_backend_params(eqn.params, backend)
       rule = initial_style_translations[eqn.primitive]
       ans = rule(c, axis_env, extend_name_stack(name_stack, eqn.primitive.name),
-                 map(aval, eqn.invars), backend, *in_nodes, **new_params)
+                 safe_map(aval, eqn.invars), backend, *in_nodes, **new_params)
     elif eqn.primitive in parallel_translations:
       replica_groups = axis_groups(axis_env, eqn.params['axis_name'])
       axis_index_groups = eqn.params.get('axis_index_groups', None)
@@ -526,22 +526,26 @@ def _xla_call_impl(fun: lu.WrappedFun, *args, device, backend, name):
           "Calling the de-optimized version.")
     return fun.call_wrapped(*args)  # probably won't return
 
-@lu.cache
 def _xla_callable(fun: lu.WrappedFun, device, backend, name, *arg_specs):
   if device is not None and backend is not None:
     raise ValueError("can't specify both a device and a backend for jit, "
                      "got device={} and backend={}".format(device, backend))
 
   abstract_args, arg_devices = unzip2(arg_specs)
-  pvals: Sequence[pe.PartialVal] = [pe.PartialVal.unknown(aval) for aval in abstract_args]
-  jaxpr, pvals, consts = pe.trace_to_jaxpr(
-      fun, pvals, instantiate=False, stage_out=True, bottom=True)
-  jaxpr, uses_outfeed = apply_outfeed_rewriter(jaxpr)
+  # pvals: Sequence[pe.PartialVal] = [pe.PartialVal.unknown(aval) for aval in abstract_args]
+
+  # jaxpr, pvals, consts = pe.trace_to_jaxpr(
+  #     fun, pvals, instantiate=False, stage_out=True, bottom=True)
+
+  jaxpr, out_avals, consts = pe.trace_to_jaxpr2(fun, abstract_args)
+  print(jaxpr)
+
   _map(prefetch, it.chain(consts, jaxpr_literals(jaxpr)))
 
   nreps = jaxpr_replicas(jaxpr)
   device = _xla_callable_device(nreps, backend, device, arg_devices)
   backend = device.platform if device else backend
+  pvals = [pe.PartialVal.unknown(a) for a in out_avals]
   result_handlers = tuple(map(partial(_pval_to_result_handler, device), pvals))
 
   # Computations that only produce constants and/or only rearrange their inputs,
@@ -666,10 +670,27 @@ def _get_device(device, backend):
   out, = compiled.local_devices()
   return out
 
+# this is basically a new call_bind, only difference from regular bind right now
+# is that (1) we call process_call and (2) we always assume multiple outputs.
+def xla_call(fun, *args, **params):
+  top_trace = core.find_top_trace(args)
+  if top_trace is None:
+    with core.new_sublevel():
+      if not core.trace_state.trace_stack.stagers:
+        return _xla_call_impl(fun, *args, **params)
+      else:
+        trace = core.trace_state.trace_stack.stagers[-1]
+        tracers = _map(trace.full_raise, args)
+        return trace.process_call(xla_call_p, fun, tracers, params)
+  else:
+    tracers = _map(top_trace.full_raise, args)
+    outs = top_trace.process_call(xla_call_p, fun, args, params)
+    return _map(core.full_lower, outs)
+
+
 xla_call_p = core.Primitive('xla_call')
 xla_call_p.call_primitive = True
 xla_call_p.multiple_results = True
-xla_call = partial(core.call_bind, xla_call_p)
 xla_call_p.def_custom_bind(xla_call)
 xla_call_p.def_impl(_xla_call_impl)
 pe.staged_out_calls.add(xla_call_p)

@@ -105,7 +105,7 @@ class JaxprTrace(Trace):
     return JaxprTracer(self, val.pval, FreeVar(val))
 
   def new_const(self, val):
-    if isinstance(val, Tracer) and val._trace.level == self.level:
+    if isinstance(val, Tracer) and getattr(val._trace, 'level', None) == self.level:
       raise Exception
     return JaxprTracer(self, PartialVal.known(val), unit)
 
@@ -352,9 +352,9 @@ class JaxprTracer(Tracer):
   def __init__(self, trace, pval: PartialVal, recipe):
     assert isinstance(pval, PartialVal)
     pv, const = pval
-    if isinstance(const, Tracer) and const._trace.level >= trace.level:
-      raise core.escaped_tracer_error(
-          "Tracer from a higher level: {} in trace {}".format(const, trace))
+    # if isinstance(const, Tracer) and const._trace.level >= trace.level:
+    #   raise core.escaped_tracer_error(
+    #       "Tracer from a higher level: {} in trace {}".format(const, trace))
     self._trace = trace
     self.pval = pval
     self.recipe = recipe
@@ -776,3 +776,132 @@ def move_binders_to_front(typed_jaxpr: TypedJaxpr, to_move: Sequence[bool]) -> T
 def _move_to_front(lst: Sequence, to_move: Sequence[bool]) -> Sequence:
   return ([elt for elt, move in zip(lst, to_move) if move] +
           [elt for elt, move in zip(lst, to_move) if not move])
+
+
+###
+
+
+class JaxprTracer2(Tracer, core.OmniTracer):
+  __slots__ = ['aval', 'recipe']
+
+  def __init__(self, trace, aval, recipe):
+    self._trace = trace
+    self.aval = aval
+    self.recipe = recipe
+
+  def __repr__(self):
+    return 'JaxprTracer2({})'.format(self.aval)
+
+  @property
+  def parents(self):
+    if isinstance(self.recipe, JaxprEqnRecipe):
+      return self.recipe.invars
+    else:
+      return []
+
+  def full_lower(self):
+    return self
+
+class JaxprTrace2(Trace):
+  def __init__(self):
+    pass
+
+  def pure(self, val):
+    return JaxprTracer2(self, raise_to_shaped(get_aval(val)),
+                        ConstVar(val))
+
+  def new_arg(self, aval):
+    return JaxprTracer2(self, aval, LambdaBinding())
+
+  def process_primitive(self, primitive, tracers, params):
+    avals = [t.aval for t in tracers]
+    out_aval = primitive.abstract_eval(*avals, **params)
+    if primitive.multiple_results:
+      out_tracers = [JaxprTracer2(self, aval, None)
+                     for aval in out_aval]
+      eqn = new_eqn_recipe(tracers, out_tracers, primitive, params)
+      for t in out_tracers: t.recipe = eqn
+      return out_tracers
+    else:
+      out_tracer = JaxprTracer2(self, out_aval, None)
+      out_tracer.recipe = new_eqn_recipe(tracers, [out_tracer], primitive, params)
+      return out_tracer
+
+  def process_call(self, call_primitive, f, tracers, params):
+    in_avals = [t.aval for t in tracers]
+    jaxpr, out_avals, consts = trace_to_jaxpr2(f, in_avals)
+    const_tracers = map(self.full_raise, consts)
+    out_tracers = [JaxprTracer2(self, a, None) for a in out_avals]
+    call_jaxpr = convert_constvars_jaxpr(jaxpr)
+    eqn = new_eqn_recipe((*const_tracers, *tracers), out_tracers,
+                         call_primitive, dict(params, call_jaxpr=call_jaxpr))
+    for t in out_tracers:
+      t.recipe = eqn
+    return out_tracers
+
+  def full_raise(self, val):
+    if isinstance(val, Tracer) and val._trace is self:
+      return val
+    else:
+      return self.pure(val)
+
+  def __repr__(self):
+    return self.__class__.__name__
+
+def tracers_to_jaxpr2(in_tracers, out_tracers):
+  newvar = core.gensym('')
+  t_to_var = {}
+  def getvar(t):
+    var = t_to_var.get(id(t))
+    if var is None:
+      var = t_to_var[id(t)] = newvar(t.aval)
+    return var
+  sorted_tracers = toposort(out_tracers)
+  invars = map(getvar, in_tracers)
+  eqns = []
+  consts = {}
+  const_to_var = {}
+  def getconstvar(c):
+    var = const_to_var.get(id(c))
+    if var is None:
+      var = const_to_var[id(c)] = newvar(get_aval(c))
+    return var
+  processed_eqn_ids = set()
+  for t in sorted_tracers:
+    recipe = t.recipe
+    if isinstance(recipe, JaxprEqnRecipe):
+      if recipe.eqn_id not in processed_eqn_ids:
+        eqns.append(recipe_to_eqn(lambda: newvar(core.abstract_unit), getvar, recipe))
+        processed_eqn_ids.add(recipe.eqn_id)
+    elif isinstance(recipe, LambdaBinding):
+      if not any(t is in_tracer for in_tracer in in_tracers):
+        raise core.escaped_tracer_error(
+            "Tracer not among input tracers {}".format(t))
+      assert in_tracers, "Lambda binding with no args"
+    elif isinstance(recipe, ConstVar):
+      v = t_to_var[id(t)] = getconstvar(recipe.val)
+      consts[v] = recipe.val
+    elif recipe is unit:
+      t_to_var[id(t)] = unitvar
+    else:
+      raise TypeError(recipe)
+
+  const_vars, const_vals = unzip2(consts.items())
+  jaxpr = Jaxpr(const_vars, invars, map(getvar, out_tracers), eqns)
+  core.skip_checks or core.check_jaxpr(jaxpr)
+  return jaxpr, const_vals
+
+
+def trace_to_jaxpr2(fun: lu.WrappedFun,
+                    in_avals: Sequence[AbstractValue]):
+  trace_stack = core.trace_state.trace_stack
+  trace = JaxprTrace2()
+  core.trace_state.trace_stack.stagers.append(trace)
+  in_tracers = map(trace.new_arg, in_avals)
+  ans = fun.call_wrapped(*in_tracers)
+  out_tracers = map(trace.full_raise, ans)
+  jaxpr, consts = tracers_to_jaxpr2(in_tracers, out_tracers)
+  out_avals = [t.aval for t in out_tracers]
+  trace_ = core.trace_state.trace_stack.stagers.pop()
+  assert trace is trace_
+  return jaxpr, out_avals, consts
