@@ -672,21 +672,48 @@ def _get_device(device, backend):
 
 # this is basically a new call_bind, only difference from regular bind right now
 # is that (1) we call process_call and (2) we always assume multiple outputs.
+# ...actually we also have process_env_traces!
 def xla_call(fun, *args, **params):
+  params_tuple = tuple(params.items())
   top_trace = core.find_top_trace(args)
   if top_trace is None:
+    fun, env_trace_todo = process_env_traces2(fun, params_tuple)
     with core.new_sublevel():
       if not core.trace_state.trace_stack.stagers:
-        return _xla_call_impl(fun, *args, **params)
+        outs = _xla_call_impl(fun, *args, **params)
       else:
         trace = core.trace_state.trace_stack.stagers[-1]
         tracers = _map(trace.full_raise, args)
-        return trace.process_call(xla_call_p, fun, tracers, params)
+        outs = trace.process_call(xla_call_p, fun, tracers, params)
   else:
+    fun, env_trace_todo = core.process_env_traces(
+        fun, 'post_process_call', xla_call_p, top_trace.level, params_tuple)
     tracers = _map(top_trace.full_raise, args)
-    outs = top_trace.process_call(xla_call_p, fun, args, params)
-    return _map(core.full_lower, outs)
+    outs = top_trace.process_call(xla_call_p, fun, tracers, params)
+  return _map(core.full_lower, apply_todos(env_trace_todo(), outs))
 
+def apply_todos(todos, outs):
+  todos_list = list(todos)
+  while todos_list:
+    outs = _map(core.full_lower, todos_list.pop()(outs))
+  return outs
+
+@lu.transformation_with_aux
+def process_env_traces2(params_tuple: tuple, *args):
+  outs = yield args, {}
+  params = dict(params_tuple)
+  todo = []
+  while True:
+    tracers = [x for x in outs if isinstance(x, core.Tracer) and hasattr(x._trace, 'level')]
+    if tracers:
+      ans = max(tracers, key=lambda x: x._trace.level)
+    else:
+      break
+    trace = type(ans._trace)(ans._trace.master, core.cur_sublevel())
+    outs = _map(trace.full_raise, outs)
+    outs, cur_todo = trace.post_process_call(xla_call_p, outs, params)
+    todo.append(cur_todo)
+  yield outs, tuple(todo)
 
 xla_call_p = core.Primitive('xla_call')
 xla_call_p.call_primitive = True

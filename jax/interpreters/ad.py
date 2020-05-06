@@ -347,12 +347,11 @@ class JVPTrace(Trace):
 
   def post_process_call(self, call_primitive, out_tracers, params):
     primals, tangents = unzip2((t.primal, t.tangent) for t in out_tracers)
-    out = primals + tangents
+    out, treedef = tree_flatten((primals, tangents))
     del primals, tangents
     master = self.master
     def todo(x):
-      n = len(x) // 2
-      primals, tangents = x[:n], x[n:]
+      primals, tangents = tree_unflatten(treedef, x)
       trace = JVPTrace(master, core.cur_sublevel())
       return map(partial(JVPTracer, trace), primals, tangents)
     return out, todo

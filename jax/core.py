@@ -1013,7 +1013,8 @@ def process_env_traces(post_processor: str, primitive: Primitive,
   params = dict(params_tuple)
   todo = []
   while True:
-    tracers = [x for x in outs if isinstance(x, Tracer) and x._trace.level > level]
+    tracers = [x for x in outs if isinstance(x, Tracer)
+               and hasattr(x._trace, 'level') and x._trace.level > level]
     if tracers:
       ans = max(tracers, key=lambda x: x._trace.level)
     else:
@@ -1097,7 +1098,8 @@ def check_jaxpr(jaxpr: Jaxpr):
 
 
 def pp_vars(vs) -> str:
-  return ' '.join(f'{v}:{v.aval.str_short()}' for v in vs)
+  # return ' '.join(f'{v}:{v.aval.str_short()}' for v in vs)
+  return ' '.join(map(str, vs))
 
 def pp_eqn_compact(primitive_name: str, params: Dict) -> PrettyPrint:
   filtered_params = {k: v for k, v in params.items()
