@@ -339,7 +339,7 @@ def partial_eval_wrapper(avals: Sequence[Optional[AbstractValue]], *consts):
 def abstract_eval_fun(fun, *avals, **params):
   pvals_in = [PartialVal.unknown(a) for a in avals]
   _, pvals_out, _ = trace_to_jaxpr(lu.wrap_init(fun, params), pvals_in,
-                                  instantiate=True, stage_out=True)
+                                   instantiate=True, stage_out=True)
   avals_out, _ = unzip2(pvals_out)
   for aval_out in avals_out:
     assert isinstance(aval_out, AbstractValue)  # instantiate=True
@@ -808,6 +808,8 @@ class JaxprTrace2(Trace):
 
   def pure(self, val):
     if isinstance(val, Tracer):
+      if isinstance(val, JaxprTracer2):
+        print(val)
       return JaxprTracer2(self, raise_to_shaped(get_aval(val)), ConstVar(val))
     else:
       return JaxprTracer2(self, raise_to_shaped(get_aval(val)), Literal(val))
@@ -847,8 +849,7 @@ class JaxprTrace2(Trace):
     else:
       return self.pure(val)
 
-  def __repr__(self):
-    return self.__class__.__name__
+  __repr__ = object.__repr__
 
 def tracers_to_jaxpr2(in_tracers, out_tracers):
   newvar = core.gensym('')

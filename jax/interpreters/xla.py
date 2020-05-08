@@ -796,9 +796,7 @@ def _array_aval_from_xla_shape(xla_shape):
 
 def lower_fun_initial_style(fun):
   def f(c, axis_env, name_stack, avals, backend, *xla_args, **params):
-    pvals = [pe.PartialVal.unknown(a) for a in avals]
-    jaxpr, _, consts = pe.trace_to_jaxpr(
-        lu.wrap_init(fun, params), pvals, instantiate=True, stage_out=True)
+    jaxpr, _, consts = pe.trace_to_jaxpr2(lu.wrap_init(fun, params), avals)
     consts = _map(partial(xb.constant, c), consts)
     outs = jaxpr_subcomp(c, jaxpr, backend, axis_env, consts, name_stack,
                          *xla_args)

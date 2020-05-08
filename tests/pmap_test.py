@@ -1184,6 +1184,26 @@ class PmapTest(jtu.JaxTestCase):
     self.assertAllClose(result1, result3, check_dtypes=False, atol=1e-3, rtol=1e-3)
     self.assertAllClose(result1, result4, check_dtypes=False, atol=1e-3, rtol=1e-3)
 
+  def test_issue_1062(self):
+    # code from https://github.com/google/jax/issues/1062 @shoyer
+    # this tests, among other things, whether ShardedDeviceTuple constants work
+    device_count = xla_bridge.device_count()
+
+    @jit
+    def multi_step(state, count):
+      return lax.fori_loop(0, count, lambda i, s: s, state)
+
+    @jit
+    def multi_step_pmap(state, count=2):
+      @partial(pmap, axis_name='x')
+      def pmapped_multi_step(state):
+        return multi_step(state, count)
+
+      return pmapped_multi_step(state)
+
+    u = np.ones((device_count, 100))
+    u_final = multi_step_pmap(u)  # doesn't crash
+
 
 class PmapWithDevicesTest(jtu.JaxTestCase):
 

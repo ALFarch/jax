@@ -95,6 +95,7 @@ class TypedJaxpr(object):
                in_avals: Sequence['AbstractValue'], out_avals: Sequence['AbstractValue']):
     assert len(literals) == len(jaxpr.constvars)
     assert len(in_avals) == len(jaxpr.invars)
+    assert not any(isinstance(l, Tracer) for l in literals)
 
     if not skip_checks:
       in_avals_raised = [raise_to_shaped(v) for v in in_avals]
@@ -881,9 +882,8 @@ class ShapedArray(UnshapedArray):
 
   def str_short(self):
     shapestr = ','.join(map(str, self.shape))
-    shapestr = '[{}]'.format(shapestr) if shapestr else ''
     dtype = onp.dtype(self.dtype.name)
-    return '{}{}{}'.format(dtype.char, 8 * dtype.itemsize, shapestr)
+    return '{}{}[{}]'.format(dtype.char, 8 * dtype.itemsize, shapestr)
 
   def __len__(self):
     try:
