@@ -2660,15 +2660,15 @@ ad.deflinear(broadcast_p, lambda t, sizes: [_reduce_sum(t, range(len(sizes)))])
 batching.primitive_batchers[broadcast_p] = _broadcast_batch_rule
 
 def _broadcast_in_dim_impl(operand, *, shape, broadcast_dimensions):
-  # if type(operand) is xla.DeviceArray:
-  #   shape = _broadcast_in_dim_shape_rule(
-  #     operand, shape=shape, broadcast_dimensions=broadcast_dimensions)
-  #   aval = ShapedArray(shape, _dtype(operand))
-  #   lazy_expr = lazy.broadcast(operand._lazy_expr, shape, broadcast_dimensions)
-  #   return xla.DeviceArray(aval, operand._device, lazy_expr, operand.device_buffer)
-  # else:
-  return xla.apply_primitive(broadcast_in_dim_p, operand, shape=shape,
-                              broadcast_dimensions=broadcast_dimensions)
+  if type(operand) is xla.DeviceArray:
+    shape = _broadcast_in_dim_shape_rule(
+      operand, shape=shape, broadcast_dimensions=broadcast_dimensions)
+    aval = ShapedArray(shape, _dtype(operand))
+    lazy_expr = lazy.broadcast(operand._lazy_expr, shape, broadcast_dimensions)
+    return xla.DeviceArray(aval, operand._device, lazy_expr, operand.device_buffer)
+  else:
+    return xla.apply_primitive(broadcast_in_dim_p, operand, shape=shape,
+                               broadcast_dimensions=broadcast_dimensions)
 
 def _broadcast_in_dim_shape_rule(operand, *, shape, broadcast_dimensions):
   _check_shapelike('broadcast_in_dim', 'shape', shape)

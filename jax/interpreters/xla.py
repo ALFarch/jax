@@ -538,6 +538,7 @@ def _xla_callable(fun: lu.WrappedFun, device, backend, name, *arg_specs):
   if any(isinstance(c, core.Tracer) for c in consts):
     raise core.UnexpectedTracerError("Encountered an unexpected tracer.")
   _map(prefetch, it.chain(consts, jaxpr_literals(jaxpr)))
+  jaxpr, uses_outfeed = apply_outfeed_rewriter(jaxpr)
 
   nreps = jaxpr_replicas(jaxpr)
   device = _xla_callable_device(nreps, backend, device, arg_devices)
