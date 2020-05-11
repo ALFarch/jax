@@ -139,6 +139,7 @@ def unpair_pval(pval):
 
 # NOTE: The FIXMEs below are caused by primal/tangent mixups (type errors if you will)
 def backward_pass(jaxpr: core.Jaxpr, consts, primals_in, cotangents_in):
+  print(jaxpr)
   if all(ct is zero for ct in cotangents_in):
     return [zero] * len(jaxpr.invars)
 
@@ -579,12 +580,16 @@ def map_transpose(primitive, params, call_jaxpr, args, ct):
   return arg_cts
 
 
+# TODO for omnistaging, don't just get literals out: get new constants which
+# could be traced! that changes signature caller needs to handle.
+# or maybe we just need to use trace_to_jaxpr2
 def jvp_jaxpr(jaxpr, nonzeros, instantiate):
   assert len(jaxpr.in_avals) == len(nonzeros)
   f = lu.wrap_init(core.jaxpr_as_fun(jaxpr))
   f_jvp, out_nonzeros = f_jvp_traceable(jvp(f, instantiate=instantiate), nonzeros)
   tangent_avals = [aval for aval, nz in zip(jaxpr.in_avals, nonzeros) if nz]
   avals_in = list(it.chain(jaxpr.in_avals, tangent_avals))
+  import ipdb; ipdb.set_trace()
   pvals = [pe.PartialVal.unknown(aval) for aval in avals_in]
   jaxpr_out, pvals_out, literals_out = pe.trace_to_jaxpr(f_jvp, pvals, instantiate=True)
   avals_out, _ = unzip2(pvals_out)

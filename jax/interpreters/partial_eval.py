@@ -808,8 +808,6 @@ class JaxprTrace2(Trace):
 
   def pure(self, val):
     if isinstance(val, Tracer):
-      if isinstance(val, JaxprTracer2):
-        print(val)
       return JaxprTracer2(self, raise_to_shaped(get_aval(val)), ConstVar(val))
     else:
       return JaxprTracer2(self, raise_to_shaped(get_aval(val)), Literal(val))
