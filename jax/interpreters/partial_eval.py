@@ -574,20 +574,19 @@ def partial_eval_jaxpr(jaxpr: TypedJaxpr, unknowns: Sequence[bool],
 
   Returns: (jaxpr_known, jaxpr_unknown, out_unknowns).
 
-  `out_unknowns` specifies which outputs are unknown (depend on some unknown
-  inputs). `jaxpr_known` takes the same inputs as `jaxpr`, ignores the unknown
-  inputs, and performs *all* the computation in `jaxpr` that depends only on the
-  known inputs. Outputs correspond to those of `jaxpr`, with the unknown ones
-  replaced with `*`, appended with the known residuals (the intermediate
-  computations in `jaxpr` that depend only on known inputs and that are needed
-  to compute the unknown outputs).
+  `out_unknowns` specifies which outputs are unknown (depend on some unknown inputs).
+  `jaxpr_known` takes the same inputs as `jaxpr`, ignores the unknown inputs,
+  and performs *all* the computation in `jaxpr` that depends only on the known inputs.
+  Outputs correspond to those of `jaxpr`, with the unknown ones replaced with `*`,
+  appended with the known residuals (the intermediate computations in `jaxpr`
+  that depend only on known inputs and that are needed to compute the unknown outputs).
 
-  `jaxpr_unknown` takes the same inputs as `jaxpr` along with the known
-  residuals computed by `jaxpr_known` and returns the same outputs as `jaxpr`
-  with the known outputs replaced by `*`.
+  `jaxpr_unknown` takes the same inputs as `jaxpr` along with the known residuals
+  computed by `jaxpr_known` and returns the same outputs as `jaxpr` with the known
+  outputs replaced by `*`.
 
-  Roughly, `jaxpr(ki, ui)` is decomposed assuming `ki` and `ui` are the known
-  and respectively unknown inputs into:
+  Roughly, `jaxpr(ki, ui)` is decomposed assuming `ki` and `ui` are the known and respectively
+  unknown inputs into:
 
      jaxpr(ki, ui) = let kout, _, kresidual = jaxpr_known(kin, *)
                      let _, uout = jaxpr_unknown(ki, ui, kresidual)
@@ -612,10 +611,11 @@ def partial_eval_jaxpr(jaxpr: TypedJaxpr, unknowns: Sequence[bool],
     cell.append((out_pvs_2, jaxpr_2, len(consts_2)))
     return out_consts_2 + consts_2
 
-  # For jaxpr_known we pass core.unit for the unknown inputs, and known
-  # PartialVal for the known inputs.
-  in_avals = [abstract_unit if uk else aval for aval, uk in zip(jaxpr.in_avals, unknowns)]
-  jaxpr_1, out_avals, consts_1 = trace_to_jaxpr2(lu.wrap_init(fun), in_avals)
+  # For jaxpr_known we pass core.unit for the unknown inputs, and known PartialVal for the
+  # known inputs.
+  pvals = [PartialVal.unknown(abstract_unit) if uk else PartialVal.unknown(aval)
+           for aval, uk in zip(jaxpr.in_avals, unknowns)]
+  jaxpr_1, out_pvals, consts_1 = trace_to_jaxpr(lu.wrap_init(fun), pvals, instantiate=True)
   (out_pvs_2, jaxpr_2, num_res), = cell
   assert len(jaxpr_2.constvars) == num_res
 
@@ -634,7 +634,8 @@ def partial_eval_jaxpr(jaxpr: TypedJaxpr, unknowns: Sequence[bool],
   in_avals_1, in_avals_2 = unzip2(map(_split_aval, unknowns, jaxpr.in_avals))
   out_avals_1, out_avals_2 = unzip2(map(_split_aval, uk_out, jaxpr.out_avals))
   # out_avals_1 and in_avals_2 need the residuals added
-  res_avals = tuple(out_avals[len(jaxpr.out_avals):])
+  out_pvs, _ = unzip2(out_pvals)
+  res_avals = out_pvs[len(jaxpr.out_avals):]
   assert len(res_avals) == num_res
   out_avals_1 = out_avals_1 + res_avals
   in_avals_2 = in_avals_2 + res_avals

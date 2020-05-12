@@ -57,20 +57,19 @@ _reduce = functools.reduce
 # TODO caching doens't work well with trace object id test in
 # JaxprTrace2.full_raise. is just level (depth) of stagers okay?
 # @cache()
-# def _initial_style_jaxpr(fun: Callable, in_tree, in_avals):
-#   in_pvals = [pe.PartialVal.unknown(aval) for aval in in_avals]
-#   wrapped_fun, out_tree = flatten_fun_nokwargs(lu.wrap_init(fun), in_tree)
-#   with core.initial_style_staging():
-#     jaxpr, out_pvals, consts = pe.trace_to_jaxpr(
-#       wrapped_fun, in_pvals, instantiate=True, stage_out=False)
-#   out_avals = _map(raise_to_shaped, unzip2(out_pvals)[0])
-#   const_avals = tuple(raise_to_shaped(core.get_aval(c)) for c in consts)
-#   typed_jaxpr = core.TypedJaxpr(pe.convert_constvars_jaxpr(jaxpr),
-#                                 (), const_avals + in_avals, out_avals)
-#   return typed_jaxpr, consts, out_tree()
+def _initial_style_jaxpr(fun: Callable, in_tree, in_avals):
+  in_pvals = [pe.PartialVal.unknown(aval) for aval in in_avals]
+  wrapped_fun, out_tree = flatten_fun_nokwargs(lu.wrap_init(fun), in_tree)
+  with core.initial_style_staging():
+    jaxpr, out_pvals, consts = pe.trace_to_jaxpr(
+      wrapped_fun, in_pvals, instantiate=True, stage_out=False)
+  out_avals = _map(raise_to_shaped, unzip2(out_pvals)[0])
+  const_avals = tuple(raise_to_shaped(core.get_aval(c)) for c in consts)
+  typed_jaxpr = core.TypedJaxpr(pe.convert_constvars_jaxpr(jaxpr),
+                                (), const_avals + in_avals, out_avals)
+  return typed_jaxpr, consts, out_tree()
 
-# TODO need process_env_traces here (testCondGrad4) ?
-# the issue is that outputs come out boxed, with our boxes under the hood.
+# TODO need all initial-style processing of jaxprs to use trace_to_jaxpr2
 def _initial_style_jaxpr(fun: Callable, in_tree, in_avals):
   fun, out_tree = flatten_fun_nokwargs(lu.wrap_init(fun), in_tree)
   jaxpr, out_avals, consts = pe.trace_to_jaxpr2(fun, in_avals)
@@ -80,6 +79,16 @@ def _initial_style_jaxpr(fun: Callable, in_tree, in_avals):
                                 (*const_avals, *in_avals), out_avals)
   return typed_jaxpr, consts, out_tree()
 
+  in_pvals = [pe.PartialVal.unknown(aval) for aval in in_avals]
+  wrapped_fun, out_tree = flatten_fun_nokwargs(lu.wrap_init(fun), in_tree)
+  with core.initial_style_staging():
+    jaxpr, out_pvals, consts = pe.trace_to_jaxpr(
+      wrapped_fun, in_pvals, instantiate=True, stage_out=False)
+  out_avals = _map(raise_to_shaped, unzip2(out_pvals)[0])
+  const_avals = tuple(raise_to_shaped(core.get_aval(c)) for c in consts)
+  typed_jaxpr = core.TypedJaxpr(pe.convert_constvars_jaxpr(jaxpr),
+                                (), const_avals + in_avals, out_avals)
+  return typed_jaxpr, consts, out_tree()
 
 
 def _abstractify(x):
@@ -549,7 +558,6 @@ def cond(pred, true_operand, true_fun, false_operand, false_fun):
 
   true_ops, true_tree = tree_flatten((true_operand,))
   true_avals = tuple(_map(_abstractify, true_ops))
-  import ipdb; ipdb.set_trace()
   true_jaxpr, true_consts, true_out_tree = _initial_style_jaxpr(true_fun, true_tree, true_avals)
   false_ops, false_tree = tree_flatten((false_operand,))
   false_avals = tuple(_map(_abstractify, false_ops))
@@ -1246,8 +1254,10 @@ def _transpose_scan_jaxpr(num_res1, num_c, num_res2, jaxpr):
   return _make_typed_jaxpr(transposed, res1_avals + c_avals + b_avals + res2_avals)
 
 def _make_typed_jaxpr(traceable: lu.WrappedFun, in_avals: Sequence[core.AbstractValue]):
-  jaxpr, out_avals, consts = pe.trace_to_jaxpr2(traceable, in_avals)
-  return core.TypedJaxpr(jaxpr, consts, in_avals, out_avals)
+  pvals = [pe.PartialVal.unknown(aval) for aval in in_avals]
+  jaxpr, pvals_out, consts = pe.trace_to_jaxpr(traceable, pvals, instantiate=True)
+  out_avals, _ = unzip2(pvals_out)
+  return core.TypedJaxpr(jaxpr, consts, in_avals, _map(raise_to_shaped, out_avals))
 
 
 def _scan_batching_rule(args, dims, reverse, length, jaxpr, num_consts,

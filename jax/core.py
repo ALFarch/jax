@@ -205,14 +205,11 @@ class Primitive(object):
     return '{}'.format(self.name)
 
   def bind(self, *args, **kwargs):
-    assert skip_checks or all(isinstance(x, Tracer)
-                              or valid_jaxtype(x) for x in args), args
+    assert skip_checks or all(isinstance(arg, Tracer)
+                              or valid_jaxtype(arg) for arg in args), args
     top_trace = find_top_trace(args)
     if top_trace is None:
       if not trace_state.trace_stack.stagers:
-        if any(isinstance(x, Tracer) for x in args):
-          import ipdb; ipdb.set_trace()
-        assert skip_checks or not any(isinstance(x, Tracer) for x in args)
         return self.impl(*args, **kwargs)
       else:
         trace = trace_state.trace_stack.stagers[-1]
