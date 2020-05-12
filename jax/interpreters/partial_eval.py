@@ -385,8 +385,7 @@ class JaxprTracer(Tracer):
 # TODO(necula): remove stage_out, replace trace_type=pe.StagingJaxprTrace
 def trace_to_jaxpr(fun: lu.WrappedFun, pvals: Sequence[PartialVal],
                    instantiate: Union[bool, Sequence[bool]] = False,
-                   stage_out=False, bottom=False,
-                   trace_type: Optional[Type[Trace]] = None) \
+                   stage_out=False, trace_type: Optional[Type[Trace]] = None) \
     -> Tuple[Jaxpr, Tuple[PartialVal, ...], Tuple[core.Value, ...]]:
   """Traces a function into a Jaxpr, given PartialVals for inputs.
 

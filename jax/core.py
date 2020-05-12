@@ -368,7 +368,6 @@ def escaped_tracer_error(detail):
 
 class UnexpectedTracerError(Exception): pass
 
-
 class TracerBase:
   __array_priority__ = 1000
   __slots__ = ['__weakref__']
@@ -492,12 +491,39 @@ aval_property = namedtuple("aval_property", ["fget"])
 aval_method = namedtuple("aval_method", ["fun"])
 
 
+class Executor: pass
+class ExecutorValue(TracerBase): pass
+
+class EvalExecutor(Executor):
+  def full_raise(self, x) -> ExecutorValue:
+    return x
+
+  def process_primitive(self, prim, args, params):
+    if any(isinstance(x, TracerBase) for x in args):
+      raise UnexpectedTracerError("Encountered an unexpected tracer.")
+    return prim.impl(*args, **params)
+
+  def process_call(self, call_primitive, f, args, params):
+    if any(isinstance(x, TracerBase) for x in args):
+      raise UnexpectedTracerError("Encountered an unexpected tracer.")
+    return call_primitive.impl(f, *args, **params)
+base_executor = EvalExecutor()
+
+@contextmanager
+def executor(e: Executor) -> Generator[Executor, None, None]:
+  trace_state.trace_stack.executors.append(e)
+  try:
+    yield e
+  finally:
+    e_ = trace_state.trace_stack.executors.pop()
+    assert e is e_
+
+
 class Tracer(TracerBase):
   __slots__ = ['_trace']
 
   def __init__(self, trace):
     self._trace = trace
-
 
 class MasterTrace:
   level: int
@@ -637,29 +663,6 @@ def initial_style_staging():
     yield
   finally:
     trace_state.initial_style = prev
-
-class ExecutorValue(TracerBase): pass
-class Executor: pass
-
-class EvalExecutor(Executor):
-  def full_raise(self, x) -> ExecutorValue:
-    return x
-
-  def process_primitive(self, prim, tracers, params):
-    return prim.impl(*tracers, **params)
-
-  def process_call(self, call_primitive, f, tracers, params):
-    return call_primitive.impl(f, *tracers, **params)
-base_executor = EvalExecutor()
-
-@contextmanager
-def executor(e: Executor) -> Generator[Executor, None, None]:
-  trace_state.trace_stack.executors.append(e)
-  try:
-    yield e
-  finally:
-    e_ = trace_state.trace_stack.executors.pop()
-    assert e is e_
 
 
 # -------------------- abstract values --------------------
@@ -1037,7 +1040,7 @@ def process_env_traces(post_processor: str, primitive: Primitive,
 def _call_bind(processor: str, post_processor: str, primitive: Primitive,
                f: lu.WrappedFun, *args, **params):
   top_trace = find_top_trace(args)
-  level = trace_state.trace_stack.next_level(True) if top_trace is None else top_trace.level
+  level = trace_state.trace_stack.next_level() if top_trace is None else top_trace.level
   params_tuple = tuple(params.items())
   f, env_trace_todo = process_env_traces(f, post_processor, primitive, level, params_tuple)
   if top_trace is None:
