@@ -433,7 +433,7 @@ def trace_to_jaxpr(fun: lu.WrappedFun, pvals: Sequence[PartialVal],
      consts = [3, 6]  # values for `ka` and `kb` constvars
   """
   trace_type = trace_type or (StagingJaxprTrace if stage_out else JaxprTrace)
-  with new_master(trace_type, bottom=bottom) as master:
+  with new_master(trace_type) as master:
     fun = trace_to_subjaxpr(fun, master, instantiate)
     jaxpr, (out_pvals, consts, env) = fun.call_wrapped(pvals)
     assert not env
@@ -781,7 +781,7 @@ def _move_to_front(lst: Sequence, to_move: Sequence[bool]) -> Sequence:
 ###
 
 
-class JaxprTracer2(Tracer, core.OmniTracer):
+class JaxprValue(core.ExecutorValue):
   __slots__ = ['aval', 'recipe']
 
   def __init__(self, trace, aval, recipe):
@@ -790,7 +790,7 @@ class JaxprTracer2(Tracer, core.OmniTracer):
     self.recipe = recipe
 
   def __repr__(self):
-    return 'JaxprTracer2({})'.format(self.aval)
+    return 'JaxprValue({})'.format(self.aval)
 
   @property
   def parents(self):
@@ -799,33 +799,19 @@ class JaxprTracer2(Tracer, core.OmniTracer):
     else:
       return []
 
-  def full_lower(self):
-    return self
 
-class JaxprTrace2(Trace):
-  def __init__(self):
-    pass
-
-  def pure(self, val):
-    if isinstance(val, Tracer):
-      return JaxprTracer2(self, raise_to_shaped(get_aval(val)), ConstVar(val))
-    else:
-      return JaxprTracer2(self, raise_to_shaped(get_aval(val)), Literal(val))
-
-  def new_arg(self, aval):
-    return JaxprTracer2(self, aval, LambdaBinding())
+class JaxprExecutor(core.Executor):
 
   def process_primitive(self, primitive, tracers, params):
     avals = [t.aval for t in tracers]
     out_aval = primitive.abstract_eval(*avals, **params)
     if primitive.multiple_results:
-      out_tracers = [JaxprTracer2(self, aval, None)
-                     for aval in out_aval]
+      out_tracers = [JaxprValue(self, aval, None) for aval in out_aval]
       eqn = new_eqn_recipe(tracers, out_tracers, primitive, params)
       for t in out_tracers: t.recipe = eqn
       return out_tracers
     else:
-      out_tracer = JaxprTracer2(self, out_aval, None)
+      out_tracer = JaxprValue(self, out_aval, None)
       out_tracer.recipe = new_eqn_recipe(tracers, [out_tracer], primitive, params)
       return out_tracer
 
@@ -833,7 +819,7 @@ class JaxprTrace2(Trace):
     in_avals = [t.aval for t in tracers]
     jaxpr, out_avals, consts = trace_to_jaxpr2(f, in_avals)
     const_tracers = map(self.full_raise, consts)
-    out_tracers = [JaxprTracer2(self, a, None) for a in out_avals]
+    out_tracers = [JaxprValue(self, a, None) for a in out_avals]
     call_jaxpr = convert_constvars_jaxpr(jaxpr)
     eqn = new_eqn_recipe((*const_tracers, *tracers), out_tracers,
                          call_primitive, dict(params, call_jaxpr=call_jaxpr))
@@ -842,10 +828,12 @@ class JaxprTrace2(Trace):
     return out_tracers
 
   def full_raise(self, val):
-    if isinstance(val, Tracer) and val._trace is self:
+    if isinstance(val, core.ExecutorValue) and val._trace is self:
       return val
+    if isinstance(val, core.TracerBase):
+      return JaxprValue(self, raise_to_shaped(get_aval(val)), ConstVar(val))
     else:
-      return self.pure(val)
+      return JaxprValue(self, raise_to_shaped(get_aval(val)), Literal(val))
 
   __repr__ = object.__repr__
 
@@ -895,18 +883,11 @@ def tracers_to_jaxpr2(in_tracers, out_tracers):
   return jaxpr, const_vals
 
 
-def trace_to_jaxpr2(fun: lu.WrappedFun,
-                    in_avals: Sequence[AbstractValue]):
-  trace_stack = core.trace_state.trace_stack
-  trace = JaxprTrace2()
-  core.trace_state.trace_stack.stagers.append(trace)
-  try:
-    in_tracers = map(trace.new_arg, in_avals)
+def trace_to_jaxpr2(fun: lu.WrappedFun, in_avals: Sequence[AbstractValue]):
+  with core.executor(JaxprExecutor()) as e:
+    in_tracers = [JaxprValue(e, aval, LambdaBinding()) for aval in in_avals]
     ans = fun.call_wrapped(*in_tracers)
-    out_tracers = map(trace.full_raise, ans)
+    out_tracers = map(e.full_raise, ans)
     jaxpr, consts = tracers_to_jaxpr2(in_tracers, out_tracers)
     out_avals = [t.aval for t in out_tracers]
-  finally:
-    trace_ = core.trace_state.trace_stack.stagers.pop()
-    assert trace is trace_
   return jaxpr, out_avals, consts

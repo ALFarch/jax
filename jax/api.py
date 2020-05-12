@@ -1583,7 +1583,7 @@ def device_put(x, device: Optional[xc.Device] = None):
 
 # TODO(mattjj): consider revising
 def _device_get(x):
-  if isinstance(x, core.Tracer):
+  if isinstance(x, core.TracerBase):
     return x
   return x.copy()
 
@@ -1598,7 +1598,7 @@ def device_get(x):
 
 def _check_args(args):
   for arg in args:
-    if not (isinstance(arg, core.Tracer) or _valid_jaxtype(arg)):
+    if not (isinstance(arg, core.TracerBase) or _valid_jaxtype(arg)):
       raise TypeError("Argument '{}' of type {} is not a valid JAX type"
                       .format(arg, type(arg)))
 

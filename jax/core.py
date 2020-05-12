@@ -95,7 +95,7 @@ class TypedJaxpr(object):
                in_avals: Sequence['AbstractValue'], out_avals: Sequence['AbstractValue']):
     assert len(literals) == len(jaxpr.constvars)
     assert len(in_avals) == len(jaxpr.invars)
-    assert not any(isinstance(l, Tracer) for l in literals)
+    assert not any(isinstance(l, TracerBase) for l in literals)
 
     if not skip_checks:
       in_avals_raised = [raise_to_shaped(v) for v in in_avals]
@@ -204,20 +204,17 @@ class Primitive(object):
   def __repr__(self):
     return '{}'.format(self.name)
 
-  def bind(self, *args, **kwargs):
-    assert skip_checks or all(isinstance(arg, Tracer)
+  def bind(self, *args, **params):
+    assert skip_checks or all(isinstance(arg, TracerBase)
                               or valid_jaxtype(arg) for arg in args), args
     top_trace = find_top_trace(args)
     if top_trace is None:
-      if not trace_state.trace_stack.stagers:
-        return self.impl(*args, **kwargs)
-      else:
-        trace = trace_state.trace_stack.stagers[-1]
-        tracers = map(trace.full_raise, args)
-        return trace.process_primitive(self, tracers, kwargs)
+      trace = trace_state.trace_stack.executors[-1]
+      tracers = map(trace.full_raise, args)
+      return trace.process_primitive(self, tracers, params)
     else:
       tracers = map(top_trace.full_raise, args)
-      out_tracer = top_trace.process_primitive(self, tracers, kwargs)
+      out_tracer = top_trace.process_primitive(self, tracers, params)
       if self.multiple_results:
         return map(full_lower, out_tracer)
       else:
@@ -235,11 +232,11 @@ class Primitive(object):
     self.bind = bind
     return bind
 
-  def impl(self, *args, **kwargs):
+  def impl(self, *args, **params):
     raise NotImplementedError("Evaluation rule for '{}' not implemented"
                               .format(self.name))
 
-  def abstract_eval(self, *args, **kwargs):
+  def abstract_eval(self, *args, **params):
     raise NotImplementedError("Abstract evaluation for '{}' not implemented"
                               .format(self.name))
 
@@ -306,7 +303,7 @@ class Trace:
     self.sublevel = sublevel
 
   def full_raise(self, val) -> 'Tracer':
-    if not isinstance(val, Tracer) or isinstance(val, OmniTracer):
+    if not isinstance(val, Tracer):
       return self.pure(val)
     level = self.level
     sublevel = self.sublevel
@@ -372,9 +369,9 @@ def escaped_tracer_error(detail):
 class UnexpectedTracerError(Exception): pass
 
 
-class Tracer(object):
+class TracerBase:
   __array_priority__ = 1000
-  __slots__ = ['_trace', '__weakref__']
+  __slots__ = ['__weakref__']
 
   def __array__(self, *args, **kw):
     raise Exception("Tracer can't be used with raw numpy functions. "
@@ -382,9 +379,6 @@ class Tracer(object):
                     "  import numpy as np\n"
                     "instead of\n"
                     "  import jax.numpy as jnp")
-
-  def __init__(self, trace):
-    self._trace = trace
 
   def __iter__(self):
     return iter(self.aval._iter(self))
@@ -497,8 +491,38 @@ class Tracer(object):
 aval_property = namedtuple("aval_property", ["fget"])
 aval_method = namedtuple("aval_method", ["fun"])
 
-class OmniTracer: pass
 
+class Tracer(TracerBase):
+  __slots__ = ['_trace']
+
+  def __init__(self, trace):
+    self._trace = trace
+
+
+class ExecutorValue(TracerBase): pass
+class Executor: pass
+
+class EvalExecutor(Executor):
+  def full_raise(self, x):
+    return x
+
+  def process_primitive(self, prim, tracers, params):
+    return prim.impl(*tracers, **params)
+
+  def process_call(self, call_primitive, f, tracers, params):
+    return call_primitive.impl(f, *tracers, **params)
+
+base_executor = EvalExecutor()
+
+@contextmanager
+def executor(e):
+  trace_state.trace_stack.executors.append(e)
+  try:
+    yield e
+  finally:
+    # e_ = trace_state.trace_stack.pop()
+    # assert e is e_
+    pass  # TODO
 
 class MasterTrace:
   level: int
@@ -519,44 +543,31 @@ class MasterTrace:
             self.level == other.level and self.trace_type == other.trace_type)
 
 class TraceStack:
-  upward: List[MasterTrace]
-  downward: List[MasterTrace]
-  stagers: List
+  stack: List[MasterTrace]
+  executors: List[Executor]
 
   def __init__(self):
-    self.upward = []
-    self.downward = []
-    self.stagers = []
+    self.stack = []
+    self.executors = [base_executor]
 
-  def next_level(self, bottom: bool) -> int:
-    if bottom:
-      return - (len(self.downward) + 1)
-    else:
-      return len(self.upward)
+  def next_level(self) -> int:
+    return len(self.stack)
 
-  def push(self, master_trace: MasterTrace, bottom: bool) -> None:
-    if bottom:
-      self.downward.append(master_trace)
-    else:
-      self.upward.append(master_trace)
+  def push(self, master_trace: MasterTrace) -> None:
+    self.stack.append(master_trace)
 
-  def pop(self, bottom: bool) -> None:
-    if bottom:
-      self.downward.pop()
-    else:
-      self.upward.pop()
+  def pop(self) -> None:
+    self.stack.pop()
 
   def __repr__(self) -> str:
-    return  'Trace stack\n{}\n{}\n{}'.format(
-      map('  {}\n'.format, self.upward[::-1]),
-      map('  {}\n'.format, self.downward),
-      map('  {}\n'.format, self.stagers))
+    return  'Trace stack\n{}\n{}'.format(
+      map('  {}\n'.format, self.stack[::-1]),
+      map('  {}\n'.format, self.executors))
 
   def copy(self):
     new = TraceStack()
-    new.upward = self.upward[:]
-    new.downward = self.downward[:]
-    new.stagers = self.stagers[:]
+    new.stack = self.stack[:]
+    new.executors = self.executors[:]
     return new
 
 class Sublevel(int): pass
@@ -586,8 +597,8 @@ trace_state = TraceState()
 def reset_trace_state() -> bool:
   "Reset the global trace state and return True if it was already clean."
   if (trace_state.substack != [Sublevel(0)] or
-      trace_state.trace_stack.downward or
-      trace_state.trace_stack.upward):
+      trace_state.trace_stack.upward or
+      trace_state.trace_stack.executors != [base_executor]):
     trace_state.__init__()  # type: ignore
     return False
   else:
@@ -597,15 +608,15 @@ def cur_sublevel() -> Sublevel:
   return trace_state.substack[-1]
 
 @contextmanager
-def new_master(trace_type: Type[Trace], bottom=False) -> Generator[MasterTrace, None, None]:
-  level = trace_state.trace_stack.next_level(bottom)
+def new_master(trace_type: Type[Trace]) -> Generator[MasterTrace, None, None]:
+  level = trace_state.trace_stack.next_level()
   master = MasterTrace(level, trace_type)
-  trace_state.trace_stack.push(master, bottom)
+  trace_state.trace_stack.push(master)
 
   try:
     yield master
   finally:
-    trace_state.trace_stack.pop(bottom)
+    trace_state.trace_stack.pop()
 
   if check_leaks:
     t = ref(master)
@@ -637,9 +648,8 @@ def full_lower(val):
 
 def find_top_trace(xs):
  try:
-   top_trace = max((x._trace for x in xs if isinstance(x, Tracer)
-                    if hasattr(x._trace, 'level') and x._trace.level >= 0),
-                   key=attrgetter('level'))
+   top_trace = max((x._trace for x in xs if isinstance(x, Tracer)),
+                    key=attrgetter('level'))
  except ValueError:
    return None
  else:
@@ -719,7 +729,7 @@ def concrete_aval(x):
 
 
 def get_aval(x):
-  if isinstance(x, Tracer):
+  if isinstance(x, TracerBase):
     return x.aval
   else:
     return concrete_aval(x)
@@ -770,7 +780,7 @@ def concrete_or_error(typ: Type, val: Any, context=""):
   """Like typ(val), but gives the context in the error message.
   Use with typ either `int`, or `bool`.
   """
-  if isinstance(val, Tracer):
+  if isinstance(val, TracerBase):
     if isinstance(val.aval, ConcreteArray):
       return typ(val.aval.val)
     else:
@@ -991,7 +1001,7 @@ def canonicalize_shape(shape):
     pass
   msg = ("Shapes must be 1D sequences of concrete values of integer type, "
          "got {}.")
-  if any(isinstance(x, Tracer) and isinstance(get_aval(x), ShapedArray)
+  if any(isinstance(x, TracerBase) and isinstance(get_aval(x), ShapedArray)
          and not isinstance(get_aval(x), ConcreteArray) for x in shape):
     msg += ("\nIf using `jit`, try using `static_argnums` or applying `jit` to "
             "smaller subfunctions.")

@@ -534,10 +534,11 @@ def _xla_callable(fun: lu.WrappedFun, device, backend, name, *arg_specs):
 
   abstract_args, arg_devices = unzip2(arg_specs)
   jaxpr, out_avals, consts = pe.trace_to_jaxpr2(fun, abstract_args)
-  if any(isinstance(c, core.Tracer) for c in consts):
+  if any(isinstance(c, core.TracerBase) for c in consts):
     raise core.UnexpectedTracerError("Encountered an unexpected tracer.")
   _map(prefetch, it.chain(consts, jaxpr_literals(jaxpr)))
   jaxpr, uses_outfeed = apply_outfeed_rewriter(jaxpr)
+  print(jaxpr)
 
   nreps = jaxpr_replicas(jaxpr)
   device = _xla_callable_device(nreps, backend, device, arg_devices)
@@ -667,20 +668,16 @@ def _get_device(device, backend):
   out, = compiled.local_devices()
   return out
 
+# TODO move this to core...
 def xla_call(fun, *args, **params):
   params_tuple = tuple(params.items())
   top_trace = core.find_top_trace(args)
   if top_trace is None:
     fun, env_trace_todo = process_env_traces2(fun, params_tuple)
+    trace = core.trace_state.trace_stack.executors[-1]
+    tracers = _map(trace.full_raise, args)
     with core.new_sublevel():
-      if not core.trace_state.trace_stack.stagers:
-        if any(isinstance(x, core.Tracer) for x in args):
-          raise core.UnexpectedTracerError("Encountered an unexpected tracer.")
-        outs = _xla_call_impl(fun, *args, **params)
-      else:
-        trace = core.trace_state.trace_stack.stagers[-1]
-        tracers = _map(trace.full_raise, args)
-        outs = trace.process_call(xla_call_p, fun, tracers, params)
+      outs = trace.process_call(xla_call_p, fun, tracers, params)
   else:
     fun, env_trace_todo = core.process_env_traces(
         fun, 'post_process_call', xla_call_p, top_trace.level, params_tuple)
@@ -700,7 +697,7 @@ def process_env_traces2(params_tuple: tuple, *args):
   params = dict(params_tuple)
   todo = []
   while True:
-    tracers = [x for x in outs if isinstance(x, core.Tracer) and hasattr(x._trace, 'level')]
+    tracers = [x for x in outs if isinstance(x, core.Tracer)]
     if tracers:
       ans = max(tracers, key=lambda x: x._trace.level)
     else:
