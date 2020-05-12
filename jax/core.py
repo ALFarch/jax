@@ -209,9 +209,9 @@ class Primitive(object):
                               or valid_jaxtype(arg) for arg in args), args
     top_trace = find_top_trace(args)
     if top_trace is None:
-      trace = trace_state.trace_stack.executors[-1]
-      tracers = map(trace.full_raise, args)
-      return trace.process_primitive(self, tracers, params)
+      executor = trace_state.trace_stack.executors[-1]
+      tracers = map(executor.full_raise, args)
+      return executor.process_primitive(self, tracers, params)
     else:
       tracers = map(top_trace.full_raise, args)
       out_tracer = top_trace.process_primitive(self, tracers, params)
@@ -499,31 +499,6 @@ class Tracer(TracerBase):
     self._trace = trace
 
 
-class ExecutorValue(TracerBase): pass
-class Executor: pass
-
-class EvalExecutor(Executor):
-  def full_raise(self, x):
-    return x
-
-  def process_primitive(self, prim, tracers, params):
-    return prim.impl(*tracers, **params)
-
-  def process_call(self, call_primitive, f, tracers, params):
-    return call_primitive.impl(f, *tracers, **params)
-
-base_executor = EvalExecutor()
-
-@contextmanager
-def executor(e):
-  trace_state.trace_stack.executors.append(e)
-  try:
-    yield e
-  finally:
-    # e_ = trace_state.trace_stack.pop()
-    # assert e is e_
-    pass  # TODO
-
 class MasterTrace:
   level: int
   trace_type: Type[Trace]
@@ -662,6 +637,29 @@ def initial_style_staging():
     yield
   finally:
     trace_state.initial_style = prev
+
+class ExecutorValue(TracerBase): pass
+class Executor: pass
+
+class EvalExecutor(Executor):
+  def full_raise(self, x) -> ExecutorValue:
+    return x
+
+  def process_primitive(self, prim, tracers, params):
+    return prim.impl(*tracers, **params)
+
+  def process_call(self, call_primitive, f, tracers, params):
+    return call_primitive.impl(f, *tracers, **params)
+base_executor = EvalExecutor()
+
+@contextmanager
+def executor(e: Executor) -> Generator[Executor, None, None]:
+  trace_state.trace_stack.executors.append(e)
+  try:
+    yield e
+  finally:
+    e_ = trace_state.trace_stack.executors.pop()
+    assert e is e_
 
 
 # -------------------- abstract values --------------------

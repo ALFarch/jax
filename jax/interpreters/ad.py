@@ -57,8 +57,7 @@ def jvpfun(instantiate, primals, tangents):
 def jvp_subtrace(master, primals, tangents):
   trace = JVPTrace(master, core.cur_sublevel())
   for x in list(primals) + list(tangents):
-    if isinstance(x, Tracer) and hasattr(x._trace, 'level'):
-      assert x._trace.level < trace.level
+    if isinstance(x, Tracer): assert x._trace.level < trace.level
   in_tracers = [JVPTracer(trace, x, t) if t is not zero else x
                 for x, t in zip(primals, tangents)]
   ans = yield in_tracers, {}

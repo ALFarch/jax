@@ -50,7 +50,8 @@ class PartialVal(tuple):
     if not core.skip_checks:
       # type checks
       assert isinstance(pv, (AbstractValue, type(None))), xs
-      assert isinstance(const, core.Tracer) or const is zero or core.valid_jaxtype(const), xs
+      assert (isinstance(const, core.TracerBase)
+              or const is zero or core.valid_jaxtype(const)), xs
       # invariant checks
       if isinstance(pv, AbstractValue):
         assert const == core.unit, xs
