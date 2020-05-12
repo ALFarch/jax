@@ -69,28 +69,6 @@ def _initial_style_jaxpr(fun: Callable, in_tree, in_avals):
                                 (), const_avals + in_avals, out_avals)
   return typed_jaxpr, consts, out_tree()
 
-# TODO need all initial-style processing of jaxprs to use trace_to_jaxpr2
-def _initial_style_jaxpr(fun: Callable, in_tree, in_avals):
-  fun, out_tree = flatten_fun_nokwargs(lu.wrap_init(fun), in_tree)
-  jaxpr, out_avals, consts = pe.trace_to_jaxpr2(fun, in_avals)
-  out_avals = _map(raise_to_shaped, out_avals)
-  const_avals = [raise_to_shaped(core.get_aval(c)) for c in consts]
-  typed_jaxpr = core.TypedJaxpr(pe.convert_constvars_jaxpr(jaxpr), (),
-                                (*const_avals, *in_avals), out_avals)
-  return typed_jaxpr, consts, out_tree()
-
-  in_pvals = [pe.PartialVal.unknown(aval) for aval in in_avals]
-  wrapped_fun, out_tree = flatten_fun_nokwargs(lu.wrap_init(fun), in_tree)
-  with core.initial_style_staging():
-    jaxpr, out_pvals, consts = pe.trace_to_jaxpr(
-      wrapped_fun, in_pvals, instantiate=True, stage_out=False)
-  out_avals = _map(raise_to_shaped, unzip2(out_pvals)[0])
-  const_avals = tuple(raise_to_shaped(core.get_aval(c)) for c in consts)
-  typed_jaxpr = core.TypedJaxpr(pe.convert_constvars_jaxpr(jaxpr),
-                                (), const_avals + in_avals, out_avals)
-  return typed_jaxpr, consts, out_tree()
-
-
 def _abstractify(x):
   return raise_to_shaped(core.get_aval(x))
 
