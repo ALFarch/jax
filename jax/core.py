@@ -894,7 +894,10 @@ class ShapedArray(UnshapedArray):
   def str_short(self):
     shapestr = ','.join(map(str, self.shape))
     dtype = onp.dtype(self.dtype.name)
-    return '{}{}[{}]'.format(dtype.char, 8 * dtype.itemsize, shapestr)
+    if dtype.itemsize == 1:
+      return 'bool[{}]'.format(shapestr)
+    else:
+      return '{}{}[{}]'.format(dtype.char, 8 * dtype.itemsize, shapestr)
 
   def __len__(self):
     try:

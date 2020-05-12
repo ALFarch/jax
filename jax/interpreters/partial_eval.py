@@ -615,7 +615,9 @@ def partial_eval_jaxpr(jaxpr: TypedJaxpr, unknowns: Sequence[bool],
   # known inputs.
   pvals = [PartialVal.unknown(abstract_unit) if uk else PartialVal.unknown(aval)
            for aval, uk in zip(jaxpr.in_avals, unknowns)]
-  jaxpr_1, out_pvals, consts_1 = trace_to_jaxpr(lu.wrap_init(fun), pvals, instantiate=True)
+  with core.executor(core.EvalExecutor()):
+    jaxpr_1, out_pvals, consts_1 = trace_to_jaxpr(lu.wrap_init(fun), pvals,
+                                                  instantiate=True)
   (out_pvs_2, jaxpr_2, num_res), = cell
   assert len(jaxpr_2.constvars) == num_res
 

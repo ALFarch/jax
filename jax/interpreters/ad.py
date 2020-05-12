@@ -586,25 +586,12 @@ def jvp_jaxpr(jaxpr, nonzeros, instantiate):
   tangent_avals = [aval for aval, nz in zip(jaxpr.in_avals, nonzeros) if nz]
   avals_in = list(it.chain(jaxpr.in_avals, tangent_avals))
   pvals = [pe.PartialVal.unknown(aval) for aval in avals_in]
-  jaxpr_out, pvals_out, literals_out = pe.trace_to_jaxpr(f_jvp, pvals, instantiate=True)
+  with core.executor(core.EvalExecutor()):
+    jaxpr_out, pvals_out, literals_out = pe.trace_to_jaxpr(f_jvp, pvals,
+                                                           instantiate=True)
   avals_out, _ = unzip2(pvals_out)
   jaxpr_out = core.TypedJaxpr(jaxpr_out, literals_out, avals_in, avals_out)
   return jaxpr_out, out_nonzeros()
-
-# TODO remove me?
-# def jvp_jaxpr(jaxpr, nonzeros, instantiate):
-#   assert len(jaxpr.in_avals) == len(nonzeros)
-#   f = lu.wrap_init(core.jaxpr_as_fun(jaxpr))
-#   f_jvp, out_nonzeros = f_jvp_traceable(jvp(f, instantiate=instantiate), nonzeros)
-#   tangent_avals = [aval for aval, nz in zip(jaxpr.in_avals, nonzeros) if nz]
-#   avals_in = list(it.chain(jaxpr.in_avals, tangent_avals))
-#   pvals = [pe.PartialVal.unknown(aval) for aval in avals_in]
-#   jaxpr_out, pvals_out, consts = pe.trace_to_jaxpr(f_jvp, pvals, instantiate=True)
-#   avals_out, _ = unzip2(pvals_out)
-#   const_avals = [raise_to_shaped(get_aval(c)) for c in consts]
-#   jaxpr_out = pe.convert_constvars_jaxpr(jaxpr_out)
-#   jaxpr_out = core.TypedJaxpr(jaxpr_out, (), const_avals + avals_in, avals_out)
-#   return jaxpr_out, out_nonzeros(), consts
 
 @lu.transformation_with_aux
 def f_jvp_traceable(nonzeros, *primals_and_nztangents):

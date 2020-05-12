@@ -2075,7 +2075,7 @@ class LazyTest(jtu.JaxTestCase):
     self.assertAllClose(x, np.ones(3), check_dtypes=False)
     self.assertAllClose(y, np.ones(3) + np.ones(3), check_dtypes=False)
 
-# TODO re-enable
+# TODO put back
 # class CustomJVPTest(jtu.JaxTestCase):
 
 #   def test_basic(self):

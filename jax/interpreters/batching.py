@@ -365,7 +365,9 @@ def batch_jaxpr(jaxpr, size, batched, instantiate):
   avals_in = [_promote_aval_rank(size, a) if b else a
               for a, b in zip(jaxpr.in_avals, batched)]
   in_pvals = [pe.PartialVal.unknown(aval) for aval in avals_in]
-  jaxpr_out, pvals_out, consts_out = pe.trace_to_jaxpr(f, in_pvals, instantiate=True)
+  with core.executor(core.EvalExecutor()):
+    jaxpr_out, pvals_out, consts_out = pe.trace_to_jaxpr(f, in_pvals,
+                                                         instantiate=True)
   avals_out, _ = unzip2(pvals_out)
   jaxpr_out = core.TypedJaxpr(jaxpr_out, consts_out, avals_in, avals_out)
   return jaxpr_out, batched_out()
