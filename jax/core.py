@@ -23,7 +23,7 @@ from weakref import ref
 import threading
 from typing import Dict, Generator, Iterator, Sequence, Type
 import types
-from typing import Any, Callable, ClassVar, Dict, List, Optional, Set
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Union
 
 import numpy as onp
 
@@ -209,9 +209,9 @@ class Primitive(object):
                               or valid_jaxtype(arg) for arg in args), args
     top_trace = find_top_trace(args)
     if top_trace is None:
-      executor = trace_state.trace_stack.executors[-1]
-      tracers = map(executor.full_raise, args)
-      return executor.process_primitive(self, tracers, params)
+      trace = trace_state.trace_stack.executors[-1]
+      tracers = map(trace.full_raise, args)
+      return trace.process_primitive(self, tracers, params)
     else:
       tracers = map(top_trace.full_raise, args)
       out_tracer = top_trace.process_primitive(self, tracers, params)
@@ -503,10 +503,13 @@ class EvalExecutor(Executor):
       raise UnexpectedTracerError("Encountered an unexpected tracer.")
     return prim.impl(*args, **params)
 
-  def process_call(self, call_primitive, f, args, params):
+  def process_call(self, primitive, f, args, params):
     if any(isinstance(x, TracerBase) for x in args):
       raise UnexpectedTracerError("Encountered an unexpected tracer.")
-    return call_primitive.impl(f, *args, **params)
+    return primitive.impl(f, *args, **params)
+
+  process_map = process_call
+
 base_executor = EvalExecutor()
 
 @contextmanager
@@ -572,6 +575,7 @@ class TraceStack:
     return new
 
 class Sublevel(int): pass
+AxisEnvFrame = namedtuple('AxisEnvFrame', ['name', 'size'])
 
 
 # The global state of the tracer is accessed by a thread-local object.
@@ -580,6 +584,7 @@ class Sublevel(int): pass
 class TraceState(threading.local):
   trace_stack: TraceStack
   substack: List[Sublevel]
+  axis_env: List[AxisEnvFrame]
   initial_style: bool
 
   def __init__(self) -> None:
@@ -1012,7 +1017,7 @@ def canonicalize_shape(shape):
   raise TypeError(msg.format(shape))
 
 
-# ------------------- Call and map -------------------
+# ------------------- Call -------------------
 
 def apply_todos(todos, outs):
   todos_list = list(todos)
@@ -1021,54 +1026,134 @@ def apply_todos(todos, outs):
   return outs
 
 @lu.transformation_with_aux
-def process_env_traces(post_processor: str, primitive: Primitive,
-                           level: int, params_tuple: tuple, *args):
+def process_env_traces(primitive: Primitive, level: Union[int, None],
+                       params_tuple: tuple, *args):
   outs = yield args, {}
   params = dict(params_tuple)
   todo = []
   while True:
     tracers = [x for x in outs if isinstance(x, Tracer)
-               and hasattr(x._trace, 'level') and x._trace.level > level]
+               and (level is None or x._trace.level > level)]
     if tracers:
       ans = max(tracers, key=lambda x: x._trace.level)
     else:
       break
     trace = type(ans._trace)(ans._trace.master, cur_sublevel())
     outs = map(trace.full_raise, outs)
-    post_process = getattr(trace, post_processor)
-    outs, cur_todo = post_process(primitive, outs, params)
+    outs, cur_todo = primitive.post_process(trace, outs, params)
     todo.append(cur_todo)
   yield outs, tuple(todo)  # Ensure the aux output is immutable
 
-def _call_bind(processor: str, post_processor: str, primitive: Primitive,
-               f: lu.WrappedFun, *args, **params):
-  top_trace = find_top_trace(args)
-  level = trace_state.trace_stack.next_level() if top_trace is None else top_trace.level
+def call_bind(primitive: Primitive, fun, *args, **params):
   params_tuple = tuple(params.items())
-  f, env_trace_todo = process_env_traces(f, post_processor, primitive, level, params_tuple)
+  top_trace = find_top_trace(args)
+  fun, env_trace_todo = process_env_traces(
+      fun, primitive, top_trace and top_trace.level, params_tuple)
   if top_trace is None:
+    trace = trace_state.trace_stack.executors[-1]
+    tracers = map(trace.full_raise, args)
     with new_sublevel():
-      outs = primitive.impl(f, *args, **params)
+      outs = primitive.process(trace, fun, tracers, params)
   else:
     tracers = map(top_trace.full_raise, args)
-    process = getattr(top_trace, processor)
-    outs = map(full_lower, process(primitive, f, tracers, params))
-  return apply_todos(env_trace_todo(), outs)
+    outs = primitive.process(top_trace, fun, tracers, params)
+  return map(full_lower, apply_todos(env_trace_todo(), outs))
 
-call_bind = partial(_call_bind, 'process_call', 'post_process_call')
-map_bind = partial(_call_bind, 'process_map', 'post_process_map')
+
+class CallPrimitive(Primitive):
+  multiple_results = True
+  call_primitive = True
+  bind = call_bind
+
+  def process(self, trace, fun, tracers, params):
+    return trace.process_call(self, fun, tracers, params)
+
+  def post_process(self, trace, out_tracers, params):
+    return trace.post_process_call(self, out_tracers, params)
 
 
 def call_impl(f: lu.WrappedFun, *args, **params):
   del params  # params parameterize the call primitive, not the function
   return f.call_wrapped(*args)
 
-call_p = Primitive('call')
-call_p.multiple_results = True
-call_p.call_primitive = True
+call_p = CallPrimitive('call')
 call = partial(call_bind, call_p)
 call_p.def_custom_bind(call)
 call_p.def_impl(call_impl)
+
+
+# ------------------- Map -------------------
+
+class MapPrimitive(Primitive):
+  multiple_results = True
+  map_primitive = True
+  bind = call_bind
+
+  def process(self, trace, fun, tracers, params):
+    return trace.process_map(self, fun, tracers, params)
+
+  def post_process(self, trace, out_tracers, params):
+    return trace.post_process_map(self, out_tracers, params)
+
+@contextmanager
+def extend_dynamic_axis_env(axis_name, size):
+  frame = AxisEnvFrame(axis_name, size)
+  trace_state.axis_env.append(frame)
+  try:
+    yield
+  finally:
+    frame_ = trace_state.axis_env.pop()
+    assert frame is frame_
+
+def axis_frame(axis_name):
+  frames = trace_state.axis_env
+  for frame in reversed(frames):
+    if frame.name == axis_name:
+      return frame
+  else:
+    raise NameError("unbound axis name: {}".format(axis_name))
+
+def axis_index(axis_name):
+  """Return the index along the mapped axis ``axis_name``.
+
+  Args:
+    axis_name: hashable Python object used to name the mapped axis.
+
+  Returns:
+    An integer representing the index.
+
+  For example, with 8 XLA devices available:
+
+  >>> from functools import partial
+  >>> @partial(jax.pmap, axis_name='i')
+  ... def f(_):
+  ...   return lax.axis_index('i')
+  ...
+  >>> f(np.zeros(4))
+  ShardedDeviceArray([0, 1, 2, 3], dtype=int32)
+  >>> f(np.zeros(8))
+  ShardedDeviceArray([0, 1, 2, 3, 4, 5, 6, 7], dtype=int32)
+  >>> @partial(jax.pmap, axis_name='i')
+  ... @partial(jax.pmap, axis_name='j')
+  ... def f(_):
+  ...   return lax.axis_index('i'), lax.axis_index('j')
+  ...
+  >>> x, y = f(np.zeros((4, 2)))
+  >>> print(x)
+  [[0 0]
+   [1 1]
+   [2 2]
+   [3 3]]
+  >>> print(y)
+  [[0 1]
+   [0 1]
+   [0 1]
+   [0 1]]
+  """
+  return axis_index_p.bind(axis_name=axis_name)
+
+axis_index_p = Primitive('axis_index')
+axis_index_p.def_abstract_eval(lambda *, axis_name: ShapedArray((), onp.uint32))
 
 
 # ------------------- Jaxpr printed representation -------------------

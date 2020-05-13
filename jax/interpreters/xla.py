@@ -543,8 +543,7 @@ def _xla_callable(fun: lu.WrappedFun, device, backend, name, *arg_specs):
   nreps = jaxpr_replicas(jaxpr)
   device = _xla_callable_device(nreps, backend, device, arg_devices)
   backend = device.platform if device else backend
-  pvals = [pe.PartialVal.unknown(a) for a in out_avals]
-  result_handlers = tuple(map(partial(_pval_to_result_handler, device), pvals))
+  result_handlers = tuple(aval_to_result_handler(device, a) for a in out_avals)
 
   # Computations that only produce constants and/or only rearrange their inputs,
   # which are often produced from partial evaluation, don't need compilation,
@@ -618,14 +617,6 @@ def _xla_callable_args(c, avals, tuple_args):
     assert next(xla_inputs, None) is None
     return xla_args
 
-def _pval_to_result_handler(device, pval):
-  pv, const = pval
-  if pv is None:
-    const = _device_put_impl(const, device) if device else const
-    return lambda _: const
-  else:
-    return aval_to_result_handler(device, pv)
-
 def _execute_compiled(compiled: XlaExecutable, uses_outfeed: bool,
                       handlers, *args):
   check_before_outfeed_execution(uses_outfeed)
@@ -668,50 +659,8 @@ def _get_device(device, backend):
   out, = compiled.local_devices()
   return out
 
-# TODO move this to core...
-def xla_call(fun, *args, **params):
-  params_tuple = tuple(params.items())
-  top_trace = core.find_top_trace(args)
-  if top_trace is None:
-    fun, env_trace_todo = process_env_traces2(fun, params_tuple)
-    trace = core.trace_state.trace_stack.executors[-1]
-    tracers = _map(trace.full_raise, args)
-    with core.new_sublevel():
-      outs = trace.process_call(xla_call_p, fun, tracers, params)
-  else:
-    fun, env_trace_todo = core.process_env_traces(
-        fun, 'post_process_call', xla_call_p, top_trace.level, params_tuple)
-    tracers = _map(top_trace.full_raise, args)
-    outs = top_trace.process_call(xla_call_p, fun, tracers, params)
-  return _map(core.full_lower, apply_todos(env_trace_todo(), outs))
-
-def apply_todos(todos, outs):
-  todos_list = list(todos)
-  while todos_list:
-    outs = _map(core.full_lower, todos_list.pop()(outs))
-  return outs
-
-@lu.transformation_with_aux
-def process_env_traces2(params_tuple: tuple, *args):
-  outs = yield args, {}
-  params = dict(params_tuple)
-  todo = []
-  while True:
-    tracers = [x for x in outs if isinstance(x, core.Tracer)]
-    if tracers:
-      ans = max(tracers, key=lambda x: x._trace.level)
-    else:
-      break
-    trace = type(ans._trace)(ans._trace.master, core.cur_sublevel())
-    outs = _map(trace.full_raise, outs)
-    outs, cur_todo = trace.post_process_call(xla_call_p, outs, params)
-    todo.append(cur_todo)
-  yield outs, tuple(todo)
-
-xla_call_p = core.Primitive('xla_call')
-xla_call_p.call_primitive = True
-xla_call_p.multiple_results = True
-xla_call_p.def_custom_bind(xla_call)
+xla_call_p = core.CallPrimitive('xla_call')
+xla_call = xla_call_p.bind
 xla_call_p.def_impl(_xla_call_impl)
 pe.staged_out_calls.add(xla_call_p)
 
@@ -1155,3 +1104,10 @@ def _remat_translation_rule(c, axis_env, in_nodes,
 
   return xops.Conditional(pred, true_op, remat_subc, false_op, dummy_subc)
 call_translations[pe.remat_call_p] = _remat_translation_rule
+
+
+def _axis_index_translation_rule(c, *, axis_name):
+  div = xb.constant(c, onp.array(nreps // prod(sizes), dtype=onp.uint32))
+  mod = xb.constant(c, onp.array(sizes[-1], dtype=onp.uint32))
+  unsigned_index = xops.Rem(xops.Div(xops.ReplicaId(c), div), mod)
+  return xops.ConvertElementType(unsigned_index, xb.dtype_to_etype(onp.int32))

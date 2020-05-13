@@ -285,7 +285,6 @@ def all_to_all(x, axis_name, split_axis, concat_axis):
 def standard_pmap_primitive(name, multiple_results=False):
   prim = core.Primitive(name)
   prim.multiple_results = multiple_results
-  prim.def_impl(partial(pxla.apply_parallel_primitive, prim))
   prim.def_abstract_eval(lambda x, *args, **params: x)
   return prim
 
@@ -361,7 +360,6 @@ psum_p.def_abstract_eval(lambda *args, **params: map(raise_to_shaped, args))
 pxla.split_axis_rules[psum_p] = \
     partial(_allreduce_split_axis_rule, psum_p, lax._reduce_sum)
 xla.parallel_translations[psum_p] = _psum_translation_rule
-pxla.parallel_pure_rules[psum_p] = lambda *args, shape: (x * prod(shape) for x in args)
 ad.deflinear(psum_p, lambda ts, axis_name, axis_index_groups: psum_p.bind(
     *ts, axis_name=axis_name, axis_index_groups=axis_index_groups))
 pxla.multi_host_supported_collectives.add(psum_p)

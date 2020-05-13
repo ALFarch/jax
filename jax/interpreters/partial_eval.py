@@ -329,9 +329,9 @@ def partial_eval(f, trace, pvs: Sequence[Optional[AbstractValue]], instantiate=F
 
 
 @lu.transformation_with_aux
-def partial_eval_wrapper(avals: Sequence[Optional[AbstractValue]], *consts):
-  py_args = (map(PartialVal, zip(avals, consts)),)
-  jaxpr, (out_pvals, consts, env) = yield py_args, {}
+def partial_eval_wrapper(pvs: Sequence[Optional[AbstractValue]], *consts):
+  py_args = map(PartialVal, zip(pvs, consts))
+  jaxpr, (out_pvals, consts, env) = yield (py_args,), {}
   out_pvs, out_consts = unzip2(out_pvals)
   out = tuple(out_consts) + tuple(consts)  # TODO: can consts be traced?
   yield out, (out_pvs, jaxpr, env)
@@ -650,12 +650,9 @@ def _split_aval(unknown, aval):
   return (abstract_unit, aval) if unknown else (aval, abstract_unit)
 
 
-remat_call_p = core.Primitive('remat_call')
-remat_call_p.call_primitive = True
-remat_call = partial(core.call_bind, remat_call_p)
-remat_call_p.def_custom_bind(remat_call)
+remat_call_p = core.CallPrimitive('remat_call')
+remat_call = remat_call_p.bind
 remat_call_p.def_impl(core.call_impl)
-remat_call_p.multiple_results = True
 
 def _remat_partial_eval(trace, _, f, tracers, params):
   concrete = params['concrete']
@@ -825,6 +822,21 @@ class JaxprExecutor(core.Executor):
     call_jaxpr = convert_constvars_jaxpr(jaxpr)
     eqn = new_eqn_recipe((*const_tracers, *tracers), out_tracers,
                          call_primitive, dict(params, call_jaxpr=call_jaxpr))
+    for t in out_tracers:
+      t.recipe = eqn
+    return out_tracers
+
+  def process_map(self, map_primitive, f, tracers, params):
+    in_avals = [t.aval for t in tracers]
+    reduced_in_avals = [_mapped_aval(params['axis_size'], a) for a in in_avals]
+    jaxpr, reduced_out_avals, consts = trace_to_jaxpr2(f, reduced_in_avals)
+    const_tracers = map(self.full_raise, consts)
+    out_avals = [_unmapped_aval(params['axis_size'], a) for a in reduced_out_avals]
+    out_tracers = [JaxprValue(self, a, None) for a in out_avals]
+    mapped_invars = (False,) * len(consts) + params['mapped_invars']
+    eqn = new_eqn_recipe((*const_tracers, *tracers), out_tracers, map_primitive,
+                         dict(params, call_jaxpr=convert_constvars_jaxpr(jaxpr),
+                              mapped_invars=mapped_invars))
     for t in out_tracers:
       t.recipe = eqn
     return out_tracers
