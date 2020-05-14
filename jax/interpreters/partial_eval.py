@@ -801,7 +801,8 @@ class JaxprValue(core.ExecutorValue):
 
 class JaxprExecutor(core.Executor):
 
-  def process_primitive(self, primitive, tracers, params):
+  def process_primitive(self, primitive, args, params):
+    tracers = map(self.full_raise, args)
     avals = [t.aval for t in tracers]
     out_aval = primitive.abstract_eval(*avals, **params)
     if primitive.multiple_results:
@@ -814,22 +815,29 @@ class JaxprExecutor(core.Executor):
       out_tracer.recipe = new_eqn_recipe(tracers, [out_tracer], primitive, params)
       return out_tracer
 
-  def process_call(self, call_primitive, f, tracers, params):
-    in_avals = [t.aval for t in tracers]
-    jaxpr, out_avals, consts = trace_to_jaxpr2(f, in_avals)
-    const_tracers = map(self.full_raise, consts)
-    out_tracers = [JaxprValue(self, a, None) for a in out_avals]
-    call_jaxpr = convert_constvars_jaxpr(jaxpr)
-    eqn = new_eqn_recipe((*const_tracers, *tracers), out_tracers,
-                         call_primitive, dict(params, call_jaxpr=call_jaxpr))
-    for t in out_tracers:
-      t.recipe = eqn
-    return out_tracers
+  def process_call(self, call_primitive, f, args, params):
+    if type(call_primitive) is core.StagedCallPrimitive:
+      tracers = map(self.full_raise, args)
+      in_avals = [t.aval for t in tracers]
+      jaxpr, out_avals, consts = trace_to_jaxpr2(f, in_avals)
+      const_tracers = map(self.full_raise, consts)
+      out_tracers = [JaxprValue(self, a, None) for a in out_avals]
+      call_jaxpr = convert_constvars_jaxpr(jaxpr)
+      eqn = new_eqn_recipe((*const_tracers, *tracers), out_tracers,
+                          call_primitive, dict(params, call_jaxpr=call_jaxpr))
+      for t in out_tracers:
+        t.recipe = eqn
+      return out_tracers
+    else:
+      return f.call_wrapped(*args)
 
-  def process_map(self, map_primitive, f, tracers, params):
+  def process_map(self, map_primitive, f, args, params):
+    tracers = map(self.full_raise, args)
     in_avals = [t.aval for t in tracers]
-    reduced_in_avals = [_mapped_aval(params['axis_size'], a) for a in in_avals]
-    jaxpr, reduced_out_avals, consts = trace_to_jaxpr2(f, reduced_in_avals)
+    reduced_in_avals = [_mapped_aval(params['axis_size'], a) if m else a
+                        for m, a in zip(params['mapped_invars'], in_avals)]
+    with core.extend_axis_env(params['axis_name'], params['axis_size']):
+      jaxpr, reduced_out_avals, consts = trace_to_jaxpr2(f, reduced_in_avals)
     const_tracers = map(self.full_raise, consts)
     out_avals = [_unmapped_aval(params['axis_size'], a) for a in reduced_out_avals]
     out_tracers = [JaxprValue(self, a, None) for a in out_avals]

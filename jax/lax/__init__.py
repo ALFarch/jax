@@ -317,5 +317,4 @@ from .lax_parallel import (
   psum,
   psum_p,
   pswapaxes,
-  standard_pmap_primitive,
 )

@@ -910,26 +910,25 @@ class APITest(jtu.JaxTestCase):
     self.assertRaisesRegex(TypeError, "Expected a function, got a generator function.*",
                            lambda: api.jit(gen))
 
-  # TODO put back
-  # def test_issue_1062(self):
-  #   # code from https://github.com/google/jax/issues/1062 @shoyer
-  #   # this tests, among other things, whether ShardedDeviceTuple constants work
-  #   device_count = xb.device_count()
+  def test_issue_1062(self):
+    # code from https://github.com/google/jax/issues/1062 @shoyer
+    # this tests, among other things, whether ShardedDeviceTuple constants work
+    device_count = xb.device_count()
 
-  #   @jit
-  #   def multi_step(state, count):
-  #     return lax.fori_loop(0, count, lambda i, s: s, state)
+    @jit
+    def multi_step(state, count):
+      return lax.fori_loop(0, count, lambda i, s: s, state)
 
-  #   @jit
-  #   def multi_step_pmap(state, count=2):
-  #     @partial(api.pmap, axis_name='x')
-  #     def pmapped_multi_step(state):
-  #       return multi_step(state, count)
+    @jit
+    def multi_step_pmap(state, count=2):
+      @partial(api.pmap, axis_name='x')
+      def pmapped_multi_step(state):
+        return multi_step(state, count)
 
-  #     return pmapped_multi_step(state)
+      return pmapped_multi_step(state)
 
-  #   u = jnp.ones((device_count, 100))
-  #   u_final = multi_step_pmap(u)  # doesn't crash
+    u = jnp.ones((device_count, 100))
+    u_final = multi_step_pmap(u)  # doesn't crash
 
   def test_concurrent_device_get_and_put(self):
     def f(x):
@@ -1170,23 +1169,22 @@ class APITest(jtu.JaxTestCase):
       return copy.deepcopy(x)
     api.jit(f)(1)
 
-  # TODO put back
-  # def test_pmap_global_cache(self):
-  #   def f(x):
-  #     assert python_should_be_executing
-  #     return x
+  def test_pmap_global_cache(self):
+    def f(x):
+      assert python_should_be_executing
+      return x
 
-  #   x = np.ones(1)
+    x = np.ones(1)
 
-  #   python_should_be_executing = True
-  #   api.pmap(f)(x)
-  #   python_should_be_executing = False
-  #   api.pmap(f)(x)
+    python_should_be_executing = True
+    api.pmap(f)(x)
+    python_should_be_executing = False
+    api.pmap(f)(x)
 
-  #   python_should_be_executing = True
-  #   api.pmap(f, 'i')(x)
-  #   python_should_be_executing = False
-  #   api.pmap(f, 'i')(x)
+    python_should_be_executing = True
+    api.pmap(f, 'i')(x)
+    python_should_be_executing = False
+    api.pmap(f, 'i')(x)
 
   def test_device_array_repr(self):
     rep = repr(jnp.ones(()) + 1.)
@@ -1347,33 +1345,32 @@ class APITest(jtu.JaxTestCase):
     expected = api.grad(api.grad(f))(3.)
     self.assertAllClose(ans, expected, check_dtypes=False)
 
-  # TODO put back
-  # def test_remat_scan(self):
-  #   to_scan = lambda c, x: (jnp.sin(c), None)
+  def test_remat_scan(self):
+    to_scan = lambda c, x: (jnp.sin(c), None)
 
-  #   def f_noremat(x):
-  #     y, _ = lax.scan(to_scan, x, np.arange(3.))
-  #     return y
+    def f_noremat(x):
+      y, _ = lax.scan(to_scan, x, np.arange(3.))
+      return y
 
-  #   def f_yesremat(x):
-  #     y, _ = lax.scan(api.remat(to_scan), x, np.arange(3.))
-  #     return y
+    def f_yesremat(x):
+      y, _ = lax.scan(api.remat(to_scan), x, np.arange(3.))
+      return y
 
-  #   ans = f_yesremat(4.)
-  #   expected = f_noremat(4.)
-  #   self.assertAllClose(ans, expected, check_dtypes=False)
+    ans = f_yesremat(4.)
+    expected = f_noremat(4.)
+    self.assertAllClose(ans, expected, check_dtypes=False)
 
-  #   ans = api.grad(f_yesremat)(4.)
-  #   expected = api.grad(f_noremat)(4.)
-  #   self.assertAllClose(ans, expected, check_dtypes=False)
+    ans = api.grad(f_yesremat)(4.)
+    expected = api.grad(f_noremat)(4.)
+    self.assertAllClose(ans, expected, check_dtypes=False)
 
-  #   jaxpr = api.make_jaxpr(api.linearize(f_yesremat, 4.)[1])(1.)
-  #   scan_eqn, = jaxpr.jaxpr.eqns
-  #   self.assertIn(' cos ', str(scan_eqn.params['jaxpr']))
+    jaxpr = api.make_jaxpr(api.linearize(f_yesremat, 4.)[1])(1.)
+    scan_eqn, = jaxpr.jaxpr.eqns
+    self.assertIn(' cos ', str(scan_eqn.params['jaxpr']))
 
-  #   jaxpr = api.make_jaxpr(api.vjp(f_yesremat, 4.)[1])(1.)
-  #   scan_eqn, = jaxpr.jaxpr.eqns
-  #   self.assertIn(' cos ', str(scan_eqn.params['jaxpr']))
+    jaxpr = api.make_jaxpr(api.vjp(f_yesremat, 4.)[1])(1.)
+    scan_eqn, = jaxpr.jaxpr.eqns
+    self.assertIn(' cos ', str(scan_eqn.params['jaxpr']))
 
   def test_remat_no_redundant_flops(self):
     # see https://github.com/google/jax/pull/1749#issuecomment-558267584

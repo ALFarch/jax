@@ -122,12 +122,7 @@ class TypedJaxpr(object):
 def jaxpr_as_fun(typed_jaxpr: TypedJaxpr, *args):
   return eval_jaxpr(typed_jaxpr.jaxpr, typed_jaxpr.literals, *args)
 
-
-
-class JaxprEqn(namedtuple('JaxprEqn',
-                          ['invars', 'outvars', 'primitive', 'params'])):
-  def __repr__(self): return str(pp_eqn(self)).rstrip()
-
+JaxprEqn = namedtuple('JaxprEqn', ['invars', 'outvars', 'primitive', 'params'])
 new_jaxpr_eqn = JaxprEqn
 
 
@@ -590,12 +585,14 @@ class TraceState(threading.local):
   def __init__(self) -> None:
     self.trace_stack = TraceStack()
     self.substack = [Sublevel(0)]
+    self.axis_env = []
     self.initial_style = False
 
   def copy(self):
     new = TraceState()
     new.trace_stack = self.trace_stack.copy()
     new.substack = self.substack[:]
+    new.axis_env = self.axis_env[:]
     new.initial_style = self.initial_style
     return new
 trace_state = TraceState()
@@ -1051,9 +1048,8 @@ def call_bind(primitive: Primitive, fun, *args, **params):
       fun, primitive, top_trace and top_trace.level, params_tuple)
   if top_trace is None:
     trace = trace_state.trace_stack.executors[-1]
-    tracers = map(trace.full_raise, args)
     with new_sublevel():
-      outs = primitive.process(trace, fun, tracers, params)
+      outs = primitive.process(trace, fun, args, params)
   else:
     tracers = map(top_trace.full_raise, args)
     outs = primitive.process(top_trace, fun, tracers, params)
@@ -1070,6 +1066,8 @@ class CallPrimitive(Primitive):
 
   def post_process(self, trace, out_tracers, params):
     return trace.post_process_call(self, out_tracers, params)
+
+class StagedCallPrimitive(CallPrimitive): pass
 
 
 def call_impl(f: lu.WrappedFun, *args, **params):
@@ -1096,7 +1094,8 @@ class MapPrimitive(Primitive):
     return trace.post_process_map(self, out_tracers, params)
 
 @contextmanager
-def extend_dynamic_axis_env(axis_name, size):
+def extend_axis_env(axis_name, size):
+  assert type(size) is int
   frame = AxisEnvFrame(axis_name, size)
   trace_state.axis_env.append(frame)
   try:
@@ -1112,6 +1111,10 @@ def axis_frame(axis_name):
       return frame
   else:
     raise NameError("unbound axis name: {}".format(axis_name))
+
+def axis_sizes(axis_names):
+  frames = trace_state.axis_env
+  return [axis_frame(name).size for name in axis_names]
 
 def axis_index(axis_name):
   """Return the index along the mapped axis ``axis_name``.
@@ -1153,7 +1156,7 @@ def axis_index(axis_name):
   return axis_index_p.bind(axis_name=axis_name)
 
 axis_index_p = Primitive('axis_index')
-axis_index_p.def_abstract_eval(lambda *, axis_name: ShapedArray((), onp.uint32))
+axis_index_p.def_abstract_eval(lambda *, axis_name: ShapedArray((), onp.int32))
 
 
 # ------------------- Jaxpr printed representation -------------------

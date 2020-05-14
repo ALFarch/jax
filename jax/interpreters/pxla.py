@@ -289,125 +289,6 @@ pxla_result_handlers[ShapedArray] = array_result_handler
 pxla_result_handlers[ConcreteArray] = array_result_handler
 
 
-### applying parallel primitives in op-by-op Python dispatch
-
-DynamicAxisEnvFrame = namedtuple('DynamicAxisEnvFrame', ['name', 'size'])
-
-class DynamicAxisEnv:
-  __slots__ = ['_frames']
-
-  def __init__(self):
-    self._frames = []
-
-  def push(self, axis_name, size):
-    self._frames.append(DynamicAxisEnvFrame(axis_name, size))
-
-  def pop(self):
-    return self._frames.pop()
-
-  def __getitem__(self, axis_name):
-    for frame in reversed(self._frames):
-      if frame.name == axis_name:
-        return frame.size
-    else:
-      raise NameError("unbound axis name: {}".format(axis_name))
-
-  @property
-  def sizes(self):
-    return tuple(frame.size for frame in self._frames)
-
-  @property
-  def nreps(self):
-    return prod(self.sizes)
-
-class _ThreadLocalState(threading.local):
-  def __init__(self):
-    self.dynamic_axis_env = DynamicAxisEnv()
-_thread_local_state = _ThreadLocalState()
-
-@contextmanager
-def extend_dynamic_axis_env(axis_name, size):
-  env = _thread_local_state.dynamic_axis_env
-  env.push(axis_name, size)
-  try:
-    yield
-  finally:
-    axis_name_, size_ = env.pop()
-    assert axis_name == axis_name_ and size == size_
-
-
-def axis_index(axis_name):
-  """Return the index along the pmapped axis ``axis_name``.
-
-  Args:
-    axis_name: hashable Python object used to name the pmapped axis (see the
-      ``pmap`` docstring for more details).
-
-  Returns:
-    An integer representing the index.
-
-  For example, with 8 XLA devices available:
-
-  >>> from functools import partial
-  >>> @partial(pmap, axis_name='i')
-  ... def f(_):
-  ...   return lax.axis_index('i')
-  ...
-  >>> f(np.zeros(4))
-  ShardedDeviceArray([0, 1, 2, 3], dtype=int32)
-  >>> f(np.zeros(8))
-  ShardedDeviceArray([0, 1, 2, 3, 4, 5, 6, 7], dtype=int32)
-  >>> @partial(pmap, axis_name='i')
-  ... @partial(pmap, axis_name='j')
-  ... def f(_):
-  ...   return lax.axis_index('i'), lax.axis_index('j')
-  ...
-  >>> x, y = f(np.zeros((4, 2)))
-  >>> print(x)
-  [[0 0]
-   [1 1]
-   [2 2]
-   [3 3]]
-  >>> print(y)
-  [[0 1]
-   [0 1]
-   [0 1]
-   [0 1]]
-  """
-  return axis_index_p.bind(axis_name=axis_name)
-
-# def _axis_index_bind(*, axis_name):
-#   dynamic_axis_env = _thread_local_state.dynamic_axis_env
-#   frame = dynamic_axis_env[axis_name]
-#   sizes = dynamic_axis_env.sizes[:dynamic_axis_env.index(frame)+1]
-#   nreps = dynamic_axis_env.nreps
-#   trace = frame.pmap_trace
-
-#   out_aval = ShapedArray((), onp.int32)
-#   out_tracer = pe.JaxprTracer(trace, pe.PartialVal.unknown(out_aval), None)
-#   eqn = pe.new_eqn_recipe([], [out_tracer], axis_index_p,
-#                           dict(nreps=nreps, sizes=sizes,
-#                                soft_size=frame.soft_size, axis_name=axis_name))
-#   out_tracer.recipe = eqn
-
-#   if not frame.soft_trace:
-#     return out_tracer
-#   else:
-#     val_out = out_tracer * frame.soft_size + onp.arange(frame.soft_size)
-#     return SplitAxisTracer(frame.soft_trace, axis_name, val_out)
-
-def _axis_index_translation_rule(c, *, axis_name):
-  div = xb.constant(c, onp.array(nreps // prod(sizes), dtype=onp.uint32))
-  mod = xb.constant(c, onp.array(sizes[-1], dtype=onp.uint32))
-  unsigned_index = xops.Rem(xops.Div(xops.ReplicaId(c), div), mod)
-  return xops.ConvertElementType(unsigned_index, xb.dtype_to_etype(onp.int32))
-
-axis_index_p = core.Primitive('axis_index')
-axis_index_p.def_abstract_eval(lambda *, axis_name: ShapedArray((), onp.uint32))
-# axis_index_p.def_custom_bind(_axis_index_bind)
-xla.translations[axis_index_p] = _axis_index_translation_rule
-
-
 ### lazy device-memory persistence and result handling
 
 class ShardedDeviceArray(xla.DeviceArray):
@@ -600,7 +481,8 @@ def parallel_callable(fun, backend, axis_name, axis_size, global_axis_size,
 
   sharded_avals = tuple(shard_aval(axis_size, aval) if m else aval
                         for m, aval in zip(mapped_invars, avals))
-  jaxpr, out_avals, consts = pe.trace_to_jaxpr2(fun, sharded_avals)
+  with core.extend_axis_env(axis_name, axis_size):
+    jaxpr, out_avals, consts = pe.trace_to_jaxpr2(fun, sharded_avals)
   jaxpr, uses_outfeed = xla.apply_outfeed_rewriter(jaxpr)
   print(jaxpr)
 
@@ -619,16 +501,10 @@ def parallel_callable(fun, backend, axis_name, axis_size, global_axis_size,
   jaxpr_replicas = xla.jaxpr_replicas(jaxpr)
   num_local_replicas = axis_size * jaxpr_replicas
   num_global_replicas = global_axis_size * jaxpr_replicas
-  axis_env = xla.AxisEnv(num_global_replicas, (axis_name,), (global_axis_size,), devices)
+  axis_env = xla.AxisEnv(num_global_replicas, (axis_name,), (global_axis_size,),
+                         devices)
 
-  tuple_args = len(sharded_avals) > 100  # pass long arg lists as tuple for TPU
-
-  c = xb.make_computation_builder("pmap_{}".format(fun.__name__))
-  xla_consts = _map(partial(xb.constant, c), consts)
-  xla_args = xla._xla_callable_args(c, sharded_avals, tuple_args)
-  out_nodes = xla.jaxpr_subcomp(c, jaxpr, backend, axis_env, xla_consts,
-                                extend_name_stack(wrap_name(name, 'pmap')), *xla_args)
-  built = c.Build(xops.Tuple(c, out_nodes))
+  handle_outs = avals_to_results_handler(axis_size, num_local_replicas, out_avals)
 
   if devices is None:
     if num_global_replicas > xb.device_count(backend):
@@ -648,8 +524,7 @@ def parallel_callable(fun, backend, axis_name, axis_size, global_axis_size,
       devices = [d for host_id in xb.host_ids()
                  for d in xb.local_devices(host_id)]
     else:
-      devices = xb.get_backend(backend).get_default_device_assignment(
-          num_global_replicas)
+      devices = xb.get_backend(backend).get_default_device_assignment(num_global_replicas)
   else:
     if num_local_replicas != len(local_devices):
       local_devices_str = ", ".join(map(str, local_devices))
@@ -662,6 +537,15 @@ def parallel_callable(fun, backend, axis_name, axis_size, global_axis_size,
       raise ValueError("compiling computation that requires %s replicas, "
                        "but %s devices were specified"
                        % (num_global_replicas, len(devices)))
+
+  tuple_args = len(sharded_avals) > 100  # pass long arg lists as tuple for TPU
+
+  c = xb.make_computation_builder("pmap_{}".format(fun.__name__))
+  xla_consts = _map(partial(xb.constant, c), consts)
+  xla_args = xla._xla_callable_args(c, sharded_avals, tuple_args)
+  out_nodes = xla.jaxpr_subcomp(c, jaxpr, backend, axis_env, xla_consts,
+                                extend_name_stack(wrap_name(name, 'pmap')), *xla_args)
+  built = c.Build(xops.Tuple(c, out_nodes))
 
   device_assignment = tuple(d.id for d in devices)
   compile_options = xb.get_compile_options(
@@ -680,7 +564,6 @@ def parallel_callable(fun, backend, axis_name, axis_size, global_axis_size,
                    for aval, spec in zip(avals, input_sharding_specs)]
   handle_args = partial(shard_args, compiled.local_devices(), input_indices)
 
-  handle_outs = avals_to_results_handler(axis_size, num_local_replicas, out_avals)
   return partial(execute_replicated, compiled, uses_outfeed, backend, handle_args,
                  handle_outs)
 
