@@ -3818,7 +3818,7 @@ def _reduce_batch_rule(batched_args, batch_dims, *, computation, jaxpr, consts,
 
 def _reduction_computation(c, jaxpr, consts, init_value):
   shape = c.GetShape(init_value)
-  axis_env = xla.AxisEnv(1)  # no parallel primitives inside reductions
+  axis_env = xla.AxisEnv(1, (), (), None)  # no parallel primitives inside reductions
   subc = xla_bridge.make_computation_builder("reduction_computation")
   assert len(consts) == 0, "Reduction computations cannot have constants"
   args = [xb.parameter(subc, 0, shape), xb.parameter(subc, 1, shape)]

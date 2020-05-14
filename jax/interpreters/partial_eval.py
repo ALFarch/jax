@@ -691,8 +691,10 @@ def _remat_partial_eval(trace, _, f, tracers, params):
                                else get_aval(var.val) if type(var) is Literal
                                else get_aval(const))
                for var, pv, const in zip(jaxpr.outvars, out_pvs, out_pval_consts1)]
-  typed_jaxpr = core.TypedJaxpr(jaxpr, consts, in_avals, out_avals)
-  in_unknowns = [t.pval[0] is not None for t in it.chain(env, tracers)]
+  const_avals = [raise_to_shaped(get_aval(c)) for c in consts]
+  typed_jaxpr = core.TypedJaxpr(convert_constvars_jaxpr(jaxpr), (),
+                                const_avals + in_avals, out_avals)
+  in_unknowns = [False] * len(consts) + [t.pval[0] is not None for t in it.chain(env, tracers)]
   jaxpr_1, jaxpr_2, out_unknowns = partial_eval_jaxpr(typed_jaxpr, in_unknowns,
                                                       instantiate=False,
                                                       trace_type=trace.master.trace_type)
@@ -712,15 +714,14 @@ def _remat_partial_eval(trace, _, f, tracers, params):
                 for uk, pv in zip(out_unknowns, out_pvs)]
   jaxpr_1_primals = _dce_jaxpr(jaxpr_1, to_compute + [False] * num_res)
   _, in_consts = unzip2(t.pval for t in it.chain(env, tracers))
-  out_pval_consts2 = core.jaxpr_as_fun(jaxpr_1_primals)(*in_consts)[:-num_res or None]
+  out_pval_consts2 = core.jaxpr_as_fun(jaxpr_1_primals)(*consts, *in_consts)[:-num_res or None]
   out_pvals = map(_reconstruct_pval, out_pvals1, out_pval_consts2, out_unknowns)
 
   # Now that we have out_pvals, the rest is just like JaxprTrace.process_call.
   instantiated_tracers = env + instantiated_tracers
   const_tracers = map(trace.new_instantiated_const, consts)
-  lifted_jaxpr = convert_constvars_jaxpr(typed_jaxpr.jaxpr)
   out_tracers = [JaxprTracer(trace, out_pval, None) for out_pval in out_pvals]
-  new_params = dict(params, call_jaxpr=lifted_jaxpr)
+  new_params = dict(params, call_jaxpr=typed_jaxpr.jaxpr)
   eqn = new_eqn_recipe(tuple(it.chain(const_tracers, instantiated_tracers)),
                        out_tracers, remat_call_p, new_params)
   for t in out_tracers: t.recipe = eqn
@@ -801,8 +802,7 @@ class JaxprValue(core.ExecutorValue):
 
 class JaxprExecutor(core.Executor):
 
-  def process_primitive(self, primitive, args, params):
-    tracers = map(self.full_raise, args)
+  def process_primitive(self, primitive, tracers, params):
     avals = [t.aval for t in tracers]
     out_aval = primitive.abstract_eval(*avals, **params)
     if primitive.multiple_results:

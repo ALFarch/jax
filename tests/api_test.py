@@ -872,18 +872,17 @@ class APITest(jtu.JaxTestCase):
     self.assertEqual(param_shapes[0].xla_element_type(),
                      xb.xla_client.PrimitiveType.TUPLE)
 
-  # TODO put back
-  # def test_staging_out_multi_replica(self):
-  #   def f(x):
-  #     return api.pmap(jnp.mean)(x)
-  #   xla_comp = api.xla_computation(f)
-  #   xla_comp(jnp.arange(8)).GetHloText()  # doesn't crash
+  def test_staging_out_multi_replica(self):
+    def f(x):
+      return api.pmap(jnp.mean)(x)
+    xla_comp = api.xla_computation(f)
+    xla_comp(jnp.arange(8)).GetHloText()  # doesn't crash
 
   def test_xla_computation_instantiate_constant_outputs(self):
     def f():
       return jnp.zeros((3, 4))
 
-    xla_comp = api.xla_computation(f, instantiate_const_outputs=True)()
+    xla_comp = api.xla_computation(f)()
     out_shape, = xla_comp.GetProgramShape().result_shape().tuple_shapes()
     self.assertEqual(out_shape.dimensions(), (3, 4))
 
@@ -1409,35 +1408,34 @@ class APITest(jtu.JaxTestCase):
     self.assertAllClose(f1(x), f2(x), check_dtypes=False)
     self.assertAllClose(api.grad(f1)(x), api.grad(f2)(x), check_dtypes=False)
 
-  # TODO put back
-  # def test_remat_symbolic_zeros(self):
-  #   # code from https://github.com/google/jax/issues/1907
-  #   test_remat = True
-  #   test_scan = True
+  def test_remat_symbolic_zeros(self):
+    # code from https://github.com/google/jax/issues/1907
+    test_remat = True
+    test_scan = True
 
-  #   key = jax.random.PRNGKey(0)
-  #   key, split = jax.random.split(key)
-  #   n = 5
+    key = jax.random.PRNGKey(0)
+    key, split = jax.random.split(key)
+    n = 5
 
-  #   def func(D0):
-  #     def shift(R, dR, **unused_kwargs):
-  #       return R + dR
+    def func(D0):
+      def shift(R, dR, **unused_kwargs):
+        return R + dR
 
-  #     def apply_fn(R):
-  #       return D0 * R
+      def apply_fn(R):
+        return D0 * R
 
-  #     Rinit = jax.random.uniform(split, (n,3), minval=0.0, maxval=5.0,
-  #                                dtype=jnp.float32)
+      Rinit = jax.random.uniform(split, (n,3), minval=0.0, maxval=5.0,
+                                 dtype=jnp.float32)
 
-  #     def move(R,i):
-  #       F = apply_fn(R)
-  #       return shift(R, 0.001 * F), jnp.array([0.])
+      def move(R,i):
+        F = apply_fn(R)
+        return shift(R, 0.001 * F), jnp.array([0.])
 
-  #     move = api.remat(move)
-  #     R, temp = lax.scan(move, Rinit, jnp.arange(2))
-  #     return R[0, 0]
+      move = api.remat(move)
+      R, temp = lax.scan(move, Rinit, jnp.arange(2))
+      return R[0, 0]
 
-  #   api.grad(func)(5.0)  # doesn't crash
+    api.grad(func)(5.0)  # doesn't crash
 
   def test_remat_jit2(self):
     @api.jit
@@ -1452,33 +1450,32 @@ class APITest(jtu.JaxTestCase):
 
     self.assertAllClose(f(3), 6, check_dtypes=False)
 
-  # TODO put back
-  # def test_remat_nontrivial_env(self):
-  #   # simplified from https://github.com/google/jax/issues/2030
+  def test_remat_nontrivial_env(self):
+    # simplified from https://github.com/google/jax/issues/2030
 
-  #   @api.remat
-  #   def foo(state, dt=0.5, c=1):
-  #     u, u_t = state
-  #     u_tt = c**2 * u
-  #     u_t = u_t + u_tt * dt
-  #     return (u, u_t)
+    @api.remat
+    def foo(state, dt=0.5, c=1):
+      u, u_t = state
+      u_tt = c**2 * u
+      u_t = u_t + u_tt * dt
+      return (u, u_t)
 
-  #   @partial(api.jit, static_argnums=(1,))
-  #   def _multi_step(state, count, dt, c):
-  #     f = lambda s, _: (foo(s, dt, c), _)
-  #     return lax.scan(f, state, None, count)
+    @partial(api.jit, static_argnums=(1,))
+    def _multi_step(state, count, dt, c):
+      f = lambda s, _: (foo(s, dt, c), _)
+      return lax.scan(f, state, None, count)
 
-  #   def multi_step(state, count, dt=1/jnp.sqrt(2), c=1):
-  #     return _multi_step(state, count, dt, c)
+    def multi_step(state, count, dt=1/jnp.sqrt(2), c=1):
+      return _multi_step(state, count, dt, c)
 
-  #   def loss(u0, target, steps, dt=1/jnp.sqrt(2), c=1):
-  #     init = (u0, jnp.zeros_like(u0))
-  #     (uf, _), _ = multi_step(init, steps, dt, c)
-  #     return ((uf - target) ** 2).mean()
+    def loss(u0, target, steps, dt=1/jnp.sqrt(2), c=1):
+      init = (u0, jnp.zeros_like(u0))
+      (uf, _), _ = multi_step(init, steps, dt, c)
+      return ((uf - target) ** 2).mean()
 
-  #   target = jnp.zeros((128, 128))
-  #   u0 = jnp.ones_like(target)
-  #   loss(u0, target, 10)  # doesn't crash
+    target = jnp.zeros((128, 128))
+    u0 = jnp.ones_like(target)
+    loss(u0, target, 10)  # doesn't crash
 
   def test_remat_jit3(self):
     # https://github.com/google/jax/issues/2180
@@ -2046,17 +2043,16 @@ class LazyTest(jtu.JaxTestCase):
     jit_result = apply_ops_closure()
     self.assertAllClose(jit_result, np_x, check_dtypes=False)
 
-  # TODO put back when pmap updated
-  # def test_constant_forcing_computations_cached(self):
-  #   # from https://github.com/google/jax/issues/1909
-  #   xla._lazy_force_computation.cache_clear()  # clear force compile cache
-  #   big_lazy_x = np.ones((api.device_count(), 100))
-  #   f = api.pmap(lambda x: 2 * x)
-  #   _ = f(big_lazy_x)
+  def test_constant_forcing_computations_cached(self):
+    # from https://github.com/google/jax/issues/1909
+    xla._lazy_force_computation.cache_clear()  # clear force compile cache
+    big_lazy_x = np.ones((api.device_count(), 100))
+    f = api.pmap(lambda x: 2 * x)
+    _ = f(big_lazy_x)
 
-  #   with self.count_compiles() as count:
-  #     _ = f(big_lazy_x)
-  #   self.assertEqual(count[0], 0)
+    with self.count_compiles() as count:
+      _ = f(big_lazy_x)
+    self.assertEqual(count[0], 0)
 
   def test_zeros_ones_compilation(self):
     w = jnp.ones(3) + jnp.ones(3)  # ensure + has a cache entry

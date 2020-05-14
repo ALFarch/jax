@@ -90,7 +90,7 @@ def subjaxprs(jaxpr: Jaxpr) -> Iterator[Jaxpr]:
         yield param.jaxpr
 
 
-class TypedJaxpr(object):
+class TypedJaxpr:
   def __init__(self, jaxpr: Jaxpr, literals: Sequence,
                in_avals: Sequence['AbstractValue'], out_avals: Sequence['AbstractValue']):
     assert len(literals) == len(jaxpr.constvars)
