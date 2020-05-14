@@ -2279,8 +2279,6 @@ class CustomJVPTest(jtu.JaxTestCase):
     self.assertAllClose(ans, expected, check_dtypes=False)
 
   def test_closed_over_tracers_error_message(self):
-    raise unittest.SkipTest("TODO")  # TODO(mattjj)
-
     def f(x):
       @api.custom_jvp
       def g(y):
@@ -2313,7 +2311,7 @@ class CustomJVPTest(jtu.JaxTestCase):
     expected = (2., 3.)
     self.assertAllClose(ans, expected, check_dtypes=False)
 
-  def test_nondiff_arg_tracer(self):
+  def test_nondiff_arg_jit_tracer(self):
     @partial(api.custom_jvp, nondiff_argnums=(0,))
     def f(x, y):
       return x * y
@@ -2533,359 +2531,359 @@ class CustomJVPTest(jtu.JaxTestCase):
     grad(experiment)(1.)  # doesn't crash
 
 
-# class CustomVJPTest(jtu.JaxTestCase):
+class CustomVJPTest(jtu.JaxTestCase):
 
-#   def test_basic(self):
-#     @api.custom_vjp
-#     def f(x):
-#       return np.sin(x)
-#     def f_fwd(x):
-#       return f(x), np.cos(x)
-#     def f_rev(cos_x, g):
-#       return (2 * cos_x * g,)
-#     f.defvjp(f_fwd, f_rev)
+  def test_basic(self):
+    @api.custom_vjp
+    def f(x):
+      return jnp.sin(x)
+    def f_fwd(x):
+      return f(x), jnp.cos(x)
+    def f_rev(cos_x, g):
+      return (2 * cos_x * g,)
+    f.defvjp(f_fwd, f_rev)
 
-#     x = 3.
-#     self.assertAllClose(f(x), np.sin(x), check_dtypes=True)
-#     self.assertAllClose(api.grad(f)(x), 2 * np.cos(x), check_dtypes=True)
-#     self.assertAllClose(api.value_and_grad(f)(x),
-#                         (np.sin(x), 2 * np.cos(x)),
-#                         check_dtypes=True)
+    x = 3.
+    self.assertAllClose(f(x), jnp.sin(x), check_dtypes=True)
+    self.assertAllClose(api.grad(f)(x), 2 * jnp.cos(x), check_dtypes=True)
+    self.assertAllClose(api.value_and_grad(f)(x),
+                        (jnp.sin(x), 2 * jnp.cos(x)),
+                        check_dtypes=True)
 
-#   def test_invariance(self):
-#     @api.custom_vjp
-#     def f(x):
-#       return np.cos(2 * x) / 2.
-#     def f_fwd(x):
-#       return (f(x), x)
-#     def f_rev(x, g):
-#       return (g * 3,)
-#     f.defvjp(f_fwd, f_rev)
-#     def f2(x):
-#       y, _ = api.value_and_grad(f)(x)
-#       return y
-#     def f3(x):
-#       y, _ = api.value_and_grad(f2)(x)
-#       return y
-#     x = 1.
-#     self.assertAllClose(f(x), f2(x), check_dtypes=False)
-#     self.assertAllClose(f(x), f3(x), check_dtypes=False)
-#     self.assertAllClose(api.grad(f)(x), api.grad(f2)(x),
-#                         check_dtypes=False)
-#     self.assertAllClose(api.grad(f)(x), api.grad(f3)(x),
-#                         check_dtypes=False)
+  def test_invariance(self):
+    @api.custom_vjp
+    def f(x):
+      return jnp.cos(2 * x) / 2.
+    def f_fwd(x):
+      return (f(x), x)
+    def f_rev(x, g):
+      return (g * 3,)
+    f.defvjp(f_fwd, f_rev)
+    def f2(x):
+      y, _ = api.value_and_grad(f)(x)
+      return y
+    def f3(x):
+      y, _ = api.value_and_grad(f2)(x)
+      return y
+    x = 1.
+    self.assertAllClose(f(x), f2(x), check_dtypes=False)
+    self.assertAllClose(f(x), f3(x), check_dtypes=False)
+    self.assertAllClose(api.grad(f)(x), api.grad(f2)(x),
+                        check_dtypes=False)
+    self.assertAllClose(api.grad(f)(x), api.grad(f3)(x),
+                        check_dtypes=False)
 
-#   def test_python_control_flow(self):
-#     @api.custom_vjp
-#     def f(x):
-#       if x > 0:
-#         return np.sin(x)
-#       else:
-#         return np.cos(x)
-#     def f_fwd(x):
-#       if x > 0:
-#         return f(x), x
-#       else:
-#         return f(x), x
-#     def f_rev(x, g):
-#       if x > 0:
-#         return (2 * g,)
-#       else:
-#         return (3 * g,)
-#     f.defvjp(f_fwd, f_rev)
-#     x = 2.
-#     self.assertAllClose(f(x), np.sin(x), check_dtypes=True)
-#     self.assertAllClose(f(-x), np.cos(-x), check_dtypes=True)
-#     self.assertAllClose(api.value_and_grad(f)(x), (np.sin(x), 2.),
-#                         check_dtypes=False)
-#     self.assertAllClose(api.value_and_grad(f)(-x), (np.cos(-x), 3.),
-#                         check_dtypes=False)
+  def test_python_control_flow(self):
+    @api.custom_vjp
+    def f(x):
+      if x > 0:
+        return jnp.sin(x)
+      else:
+        return jnp.cos(x)
+    def f_fwd(x):
+      if x > 0:
+        return f(x), x
+      else:
+        return f(x), x
+    def f_rev(x, g):
+      if x > 0:
+        return (2 * g,)
+      else:
+        return (3 * g,)
+    f.defvjp(f_fwd, f_rev)
+    x = 2.
+    self.assertAllClose(f(x), jnp.sin(x), check_dtypes=True)
+    self.assertAllClose(f(-x), jnp.cos(-x), check_dtypes=True)
+    self.assertAllClose(api.value_and_grad(f)(x), (jnp.sin(x), 2.),
+                        check_dtypes=False)
+    self.assertAllClose(api.value_and_grad(f)(-x), (jnp.cos(-x), 3.),
+                        check_dtypes=False)
 
-#   def test_vmap(self):
-#     @api.custom_vjp
-#     def f(x):
-#       assert np.ndim(x) == 0
-#       return np.sin(x)
-#     def f_fwd(x):
-#       assert np.ndim(x) == 0
-#       return f(x), np.cos(x)
-#     def f_rev(cos_x, g):
-#       return (2 * cos_x * g,)
-#     f.defvjp(f_fwd, f_rev)
+  def test_vmap(self):
+    @api.custom_vjp
+    def f(x):
+      assert jnp.ndim(x) == 0
+      return jnp.sin(x)
+    def f_fwd(x):
+      assert jnp.ndim(x) == 0
+      return f(x), jnp.cos(x)
+    def f_rev(cos_x, g):
+      return (2 * cos_x * g,)
+    f.defvjp(f_fwd, f_rev)
 
-#     x = np.arange(3.)
-#     xx = np.arange(6.).reshape(2, 3)
+    x = jnp.arange(3.)
+    xx = jnp.arange(6.).reshape(2, 3)
 
-#     # vmap of f
-#     self.assertAllClose(api.vmap(f)(x), np.sin(x), check_dtypes=True)
-#     self.assertAllClose(api.vmap(api.vmap(f))(xx), np.sin(xx), check_dtypes=True)
+    # vmap of f
+    self.assertAllClose(api.vmap(f)(x), jnp.sin(x), check_dtypes=True)
+    self.assertAllClose(api.vmap(api.vmap(f))(xx), jnp.sin(xx), check_dtypes=True)
 
-#     # vmap of grad of f
-#     self.assertAllClose(api.vmap(api.grad(f))(x), 2 * np.cos(x),
-#                         check_dtypes=True)
-#     self.assertAllClose(api.vmap(api.value_and_grad(f))(x),
-#                         (np.sin(x), 2 * np.cos(x)),
-#                         check_dtypes=True)
-#     self.assertAllClose(api.vmap(api.vmap(api.grad(f)))(xx), 2 * np.cos(xx),
-#                         check_dtypes=True)
-#     self.assertAllClose(api.vmap(api.vmap(api.value_and_grad(f)))(xx),
-#                         (np.sin(xx), 2 * np.cos(xx)),
-#                         check_dtypes=True)
+    # vmap of grad of f
+    self.assertAllClose(api.vmap(api.grad(f))(x), 2 * jnp.cos(x),
+                        check_dtypes=True)
+    self.assertAllClose(api.vmap(api.value_and_grad(f))(x),
+                        (jnp.sin(x), 2 * jnp.cos(x)),
+                        check_dtypes=True)
+    self.assertAllClose(api.vmap(api.vmap(api.grad(f)))(xx), 2 * jnp.cos(xx),
+                        check_dtypes=True)
+    self.assertAllClose(api.vmap(api.vmap(api.value_and_grad(f)))(xx),
+                        (jnp.sin(xx), 2 * jnp.cos(xx)),
+                        check_dtypes=True)
 
-#     # grad of vmap of f
-#     self.assertAllClose(api.grad(lambda x: api.vmap(f)(x).sum())(x),
-#                         2 * np.cos(x),
-#                         check_dtypes=True)
-#     self.assertAllClose(api.grad(lambda x: api.vmap(api.vmap(f))(x).sum())(xx),
-#                         2 * np.cos(xx),
-#                         check_dtypes=True)
+    # grad of vmap of f
+    self.assertAllClose(api.grad(lambda x: api.vmap(f)(x).sum())(x),
+                        2 * jnp.cos(x),
+                        check_dtypes=True)
+    self.assertAllClose(api.grad(lambda x: api.vmap(api.vmap(f))(x).sum())(xx),
+                        2 * jnp.cos(xx),
+                        check_dtypes=True)
 
-#     # vmap of grad of vmap of f
-#     self.assertAllClose(api.vmap(api.grad(lambda x: api.vmap(f)(x).sum()))(xx),
-#                         2 * np.cos(xx),
-#                         check_dtypes=True)
+    # vmap of grad of vmap of f
+    self.assertAllClose(api.vmap(api.grad(lambda x: api.vmap(f)(x).sum()))(xx),
+                        2 * jnp.cos(xx),
+                        check_dtypes=True)
 
-#   def test_jit(self):
-#     @api.custom_vjp
-#     def f(x):
-#       return np.sin(x)
-#     def f_fwd(x):
-#       return f(x), np.cos(x)
-#     def f_rev(cos_x, g):
-#       return (2 * cos_x * g,)
-#     f.defvjp(f_fwd, f_rev)
+  def test_jit(self):
+    @api.custom_vjp
+    def f(x):
+      return jnp.sin(x)
+    def f_fwd(x):
+      return f(x), jnp.cos(x)
+    def f_rev(cos_x, g):
+      return (2 * cos_x * g,)
+    f.defvjp(f_fwd, f_rev)
 
-#     x = 3.
+    x = 3.
 
-#     # jit
-#     self.assertAllClose(api.jit(f)(x), np.sin(x), check_dtypes=True)
-#     self.assertAllClose(api.jit(api.jit(f))(x), np.sin(x), check_dtypes=True)
+    # jit
+    self.assertAllClose(api.jit(f)(x), jnp.sin(x), check_dtypes=True)
+    self.assertAllClose(api.jit(api.jit(f))(x), jnp.sin(x), check_dtypes=True)
 
-#     # jit of grad
-#     self.assertAllClose(api.jit(api.grad(f))(x), 2 * np.cos(x),
-#                         check_dtypes=False)
+    # jit of grad
+    self.assertAllClose(api.jit(api.grad(f))(x), 2 * jnp.cos(x),
+                        check_dtypes=False)
 
-#     # grad of jit
-#     self.assertAllClose(api.grad(api.jit(f))(x), 2 * np.cos(x),
-#                         check_dtypes=False)
+    # grad of jit
+    self.assertAllClose(api.grad(api.jit(f))(x), 2 * jnp.cos(x),
+                        check_dtypes=False)
 
-#   def test_pytrees(self):
-#     @api.custom_vjp
-#     def f(x):
-#       return {'b': np.sin(x['a'])}
-#     def f_fwd(x):
-#       return f(x), {'r': np.cos(x['a'])}
-#     def f_bwd(res, g):
-#       cos_x = res['r']
-#       return ({'a': 2 * cos_x * g['b']},)
-#     f.defvjp(f_fwd, f_bwd)
-#     x = {'a': 3.}
-#     self.assertAllClose(f(x)['b'], np.sin(x['a']), check_dtypes=True)
-#     self.assertAllClose(api.grad(lambda x: f(x)['b'])(x),
-#                         {'a': 2 * np.cos(x['a'])},
-#                         check_dtypes=True)
+  def test_pytrees(self):
+    @api.custom_vjp
+    def f(x):
+      return {'b': jnp.sin(x['a'])}
+    def f_fwd(x):
+      return f(x), {'r': jnp.cos(x['a'])}
+    def f_bwd(res, g):
+      cos_x = res['r']
+      return ({'a': 2 * cos_x * g['b']},)
+    f.defvjp(f_fwd, f_bwd)
+    x = {'a': 3.}
+    self.assertAllClose(f(x)['b'], jnp.sin(x['a']), check_dtypes=True)
+    self.assertAllClose(api.grad(lambda x: f(x)['b'])(x),
+                        {'a': 2 * jnp.cos(x['a'])},
+                        check_dtypes=True)
 
-#   def test_jvp_error(self):
-#     @api.custom_vjp
-#     def f(x):
-#       return np.sin(x)
-#     def f_fwd(x):
-#       return f(x), np.cos(x)
-#     def f_rev(cos_x, g):
-#       return (2 * cos_x * g,)
-#     f.defvjp(f_fwd, f_rev)
+  def test_jvp_error(self):
+    @api.custom_vjp
+    def f(x):
+      return jnp.sin(x)
+    def f_fwd(x):
+      return f(x), jnp.cos(x)
+    def f_rev(cos_x, g):
+      return (2 * cos_x * g,)
+    f.defvjp(f_fwd, f_rev)
 
-#     self.assertRaisesRegex(
-#         TypeError,
-#         r"can't apply forward-mode autodiff \(jvp\) to a custom_vjp function.",
-#         lambda: api.jvp(f, (3.,), (1.,)))
-#     self.assertRaisesRegex(
-#         TypeError,
-#         r"can't apply forward-mode autodiff \(jvp\) to a custom_vjp function.",
-#         lambda: api.jvp(api.vmap(f), (np.arange(3.),), (np.ones(3),)))
+    self.assertRaisesRegex(
+        TypeError,
+        r"can't apply forward-mode autodiff \(jvp\) to a custom_vjp function.",
+        lambda: api.jvp(f, (3.,), (1.,)))
+    self.assertRaisesRegex(
+        TypeError,
+        r"can't apply forward-mode autodiff \(jvp\) to a custom_vjp function.",
+        lambda: api.jvp(api.vmap(f), (jnp.arange(3.),), (jnp.ones(3),)))
 
-#   def test_kwargs(self):
-#     # from https://github.com/google/jax/issues/1938
-#     @api.custom_vjp
-#     def my_fun(x, y, c=1.):
-#       return c * (x + y)
-#     my_fun.defvjp(lambda x, y, c=1.: (my_fun(c, y, c), None),
-#                   lambda _, g: (g, g, g))
-#     f = lambda x, y: np.square(my_fun(x, y, c=2.)).sum()
-#     f(10., 5.)  # doesn't crash
-#     api.grad(f)(10., 5.)  # doesn't crash
+  def test_kwargs(self):
+    # from https://github.com/google/jax/issues/1938
+    @api.custom_vjp
+    def my_fun(x, y, c=1.):
+      return c * (x + y)
+    my_fun.defvjp(lambda x, y, c=1.: (my_fun(c, y, c), None),
+                  lambda _, g: (g, g, g))
+    f = lambda x, y: jnp.square(my_fun(x, y, c=2.)).sum()
+    f(10., 5.)  # doesn't crash
+    api.grad(f)(10., 5.)  # doesn't crash
 
-#   def test_initial_style(self):
-#     @api.custom_vjp
-#     def f(x):
-#       return np.sin(x)
-#     def f_fwd(x):
-#       return f(x), np.cos(x)
-#     def f_rev(cos_x, g):
-#       return (2 * cos_x * g,)
-#     f.defvjp(f_fwd, f_rev)
+  def test_initial_style(self):
+    @api.custom_vjp
+    def f(x):
+      return jnp.sin(x)
+    def f_fwd(x):
+      return f(x), jnp.cos(x)
+    def f_rev(cos_x, g):
+      return (2 * cos_x * g,)
+    f.defvjp(f_fwd, f_rev)
 
-#     def foo(x):
-#       out, _  = lax.scan(lambda c, _: (f(c), None), x, None, length=1)
-#       return out
+    def foo(x):
+      out, _  = lax.scan(lambda c, _: (f(c), None), x, None, length=1)
+      return out
 
-#     ans = api.grad(foo)(3.)
-#     expected = 2. * np.cos(3.)
-#     self.assertAllClose(ans, expected, check_dtypes=False)
+    ans = api.grad(foo)(3.)
+    expected = 2. * jnp.cos(3.)
+    self.assertAllClose(ans, expected, check_dtypes=False)
 
-#     ans = api.grad(api.grad(foo))(3.)
-#     expected = -2. * np.sin(3.)
-#     self.assertAllClose(ans, expected, check_dtypes=True)
+    ans = api.grad(api.grad(foo))(3.)
+    expected = -2. * jnp.sin(3.)
+    self.assertAllClose(ans, expected, check_dtypes=True)
 
-#   def test_initial_style_vmap(self):
-#     @api.custom_vjp
-#     def f(x):
-#       assert np.ndim(x) == 0
-#       return 3 * x
-#     def f_fwd(x):
-#       return f(x), np.cos(x)
-#     def f_rev(cos_x, g):
-#       return (2 * cos_x * g,)
-#     f.defvjp(f_fwd, f_rev)
+  def test_initial_style_vmap(self):
+    @api.custom_vjp
+    def f(x):
+      assert jnp.ndim(x) == 0
+      return 3 * x
+    def f_fwd(x):
+      return f(x), jnp.cos(x)
+    def f_rev(cos_x, g):
+      return (2 * cos_x * g,)
+    f.defvjp(f_fwd, f_rev)
 
-#     def foo(x):
-#       out, _  = lax.scan(lambda c, _: (f(c), None), x, None, length=1)
-#       return out
+    def foo(x):
+      out, _  = lax.scan(lambda c, _: (f(c), None), x, None, length=1)
+      return out
 
-#     ans = api.vmap(foo)(np.arange(3.))
-#     expected = 3. * np.arange(3.)
-#     self.assertAllClose(ans, expected, check_dtypes=False)
+    ans = api.vmap(foo)(jnp.arange(3.))
+    expected = 3. * jnp.arange(3.)
+    self.assertAllClose(ans, expected, check_dtypes=False)
 
-#     ans = api.grad(lambda x: api.vmap(foo)(x).sum())(np.arange(3.))
-#     expected = 2. * np.cos(np.arange(3.))
-#     self.assertAllClose(ans, expected, check_dtypes=False)
+    ans = api.grad(lambda x: api.vmap(foo)(x).sum())(jnp.arange(3.))
+    expected = 2. * jnp.cos(jnp.arange(3.))
+    self.assertAllClose(ans, expected, check_dtypes=False)
 
-#   def test_nondiff_arg(self):
-#     @partial(api.custom_vjp, nondiff_argnums=(0,))
-#     def app(f, x):
-#       return f(x)
-#     def app_fwd(f, x):
-#       return app(f, x), np.cos(x)
-#     def app_rev(f, cos_x, g):
-#       return (cos_x * g,)
-#     app.defvjp(app_fwd, app_rev)
+  def test_nondiff_arg(self):
+    @partial(api.custom_vjp, nondiff_argnums=(0,))
+    def app(f, x):
+      return f(x)
+    def app_fwd(f, x):
+      return app(f, x), jnp.cos(x)
+    def app_rev(f, cos_x, g):
+      return (cos_x * g,)
+    app.defvjp(app_fwd, app_rev)
 
-#     ans = app(lambda x: 2 * x, 1)
-#     expected = 2
-#     self.assertAllClose(ans, expected, check_dtypes=False)
+    ans = app(lambda x: 2 * x, 1)
+    expected = 2
+    self.assertAllClose(ans, expected, check_dtypes=False)
 
-#     ans = api.value_and_grad(lambda x: app(lambda y: 2 * y, x))(1.)
-#     expected = (2., np.cos(1.))
-#     self.assertAllClose(ans, expected, check_dtypes=False)
+    ans = api.value_and_grad(lambda x: app(lambda y: 2 * y, x))(1.)
+    expected = (2., jnp.cos(1.))
+    self.assertAllClose(ans, expected, check_dtypes=False)
 
-#   def test_nondiff_arg_tracer(self):
-#     @partial(api.custom_vjp, nondiff_argnums=(0,))
-#     def f(x, y):
-#       return x * y
-#     def f_fwd(x, y):
-#       return f(x, y), np.cos(y)
-#     def f_rev(x, cos_y, g):
-#       return (cos_y * g,)
-#     f.defvjp(f_fwd, f_rev)
+  def test_nondiff_arg_tracer(self):
+    @partial(api.custom_vjp, nondiff_argnums=(0,))
+    def f(x, y):
+      return x * y
+    def f_fwd(x, y):
+      return f(x, y), jnp.cos(y)
+    def f_rev(x, cos_y, g):
+      return (cos_y * g,)
+    f.defvjp(f_fwd, f_rev)
 
-#     @jit
-#     def g(x, y):
-#       return f(x, y)
+    @jit
+    def g(x, y):
+      return f(x, y)
 
-#     ans = g(2, 3.)
-#     expected = 6.
-#     self.assertAllClose(ans, expected, check_dtypes=False)
+    ans = g(2, 3.)
+    expected = 6.
+    self.assertAllClose(ans, expected, check_dtypes=False)
 
-#     ans = api.grad(g, 1)(2., 3.)
-#     expected = np.cos(3.)
-#     self.assertAllClose(ans, expected, check_dtypes=False)
+    ans = api.grad(g, 1)(2., 3.)
+    expected = jnp.cos(3.)
+    self.assertAllClose(ans, expected, check_dtypes=False)
 
-#   def test_vmap_axes(self):
-#     raise unittest.SkipTest("TODO")  # TODO(mattjj): write test
+  def test_vmap_axes(self):
+    raise unittest.SkipTest("TODO")  # TODO(mattjj): write test
 
-#   def test_pmap(self):
-#     raise unittest.SkipTest("TODO")  # TODO(mattjj): write test
+  def test_pmap(self):
+    raise unittest.SkipTest("TODO")  # TODO(mattjj): write test
 
-#   def test_missing_vjp_rule_error(self):
-#     @api.custom_vjp
-#     def foo(x):
-#       return x ** 2
+  def test_missing_vjp_rule_error(self):
+    @api.custom_vjp
+    def foo(x):
+      return x ** 2
 
-#     self.assertRaisesRegex(
-#         AttributeError,
-#         r"No VJP defined for custom_vjp function foo using defvjp.",
-#         lambda: foo(2))
-#     self.assertRaisesRegex(
-#         AttributeError,
-#         r"No VJP defined for custom_vjp function foo using defvjp.",
-#         lambda: api.grad(foo)(2.))
+    self.assertRaisesRegex(
+        AttributeError,
+        r"No VJP defined for custom_vjp function foo using defvjp.",
+        lambda: foo(2))
+    self.assertRaisesRegex(
+        AttributeError,
+        r"No VJP defined for custom_vjp function foo using defvjp.",
+        lambda: api.grad(foo)(2.))
 
-#   def test_vjp_rule_inconsistent_pytree_structures_error(self):
-#     @api.custom_vjp
-#     def f(x):
-#       return x
+  def test_vjp_rule_inconsistent_pytree_structures_error(self):
+    @api.custom_vjp
+    def f(x):
+      return x
 
-#     def foo_fwd(x):
-#       return x, None
+    def foo_fwd(x):
+      return x, None
 
-#     def foo_bwd(_, g):
-#       return g
+    def foo_bwd(_, g):
+      return g
 
-#     f.defvjp(foo_fwd, foo_bwd)
+    f.defvjp(foo_fwd, foo_bwd)
 
-#     f(2)  # doesn't crash
-#     self.assertRaisesRegex(
-#         TypeError,
-#         re.escape(
-#             "Custom VJP rule must produce an output with the same container "
-#             "(pytree) structure as the args tuple of the primal function, "
-#             "and in particular must produce a tuple of length equal to the "
-#             "number of arguments to the primal function, but got VJP output "
-#             "structure {} for primal input structure {}.".format(
-#                 tree_util.tree_structure(1),
-#                 tree_util.tree_structure((1,)))
-#         ),
-#         lambda: api.grad(f)(2.))
+    f(2)  # doesn't crash
+    self.assertRaisesRegex(
+        TypeError,
+        re.escape(
+            "Custom VJP rule must produce an output with the same container "
+            "(pytree) structure as the args tuple of the primal function, "
+            "and in particular must produce a tuple of length equal to the "
+            "number of arguments to the primal function, but got VJP output "
+            "structure {} for primal input structure {}.".format(
+                tree_util.tree_structure(1),
+                tree_util.tree_structure((1,)))
+        ),
+        lambda: api.grad(f)(2.))
 
-#   def test_issue2511(self):
-#     arr = np.ones((5, 2, 2))
-#     foo = lambda x: api.vmap(np.linalg.det, (0,))(x)
-#     api.jit(foo)(arr)  # doesn't crash
+  def test_issue2511(self):
+    arr = jnp.ones((5, 2, 2))
+    foo = lambda x: api.vmap(jnp.linalg.det, (0,))(x)
+    api.jit(foo)(arr)  # doesn't crash
 
-#   def test_lowering_out_of_traces(self):
-#     # https://github.com/google/jax/issues/2578
+  def test_lowering_out_of_traces(self):
+    # https://github.com/google/jax/issues/2578
 
-#     class F(collections.namedtuple("F", ["a"])):
-#       def __call__(self, x):
-#         return jax.nn.relu(self.a) * x
+    class F(collections.namedtuple("F", ["a"])):
+      def __call__(self, x):
+        return jax.nn.relu(self.a) * x
 
-#     @jax.jit
-#     def g(f, x):
-#       return f(x)
+    @jax.jit
+    def g(f, x):
+      return f(x)
 
-#     jax.grad(g, argnums=(1,))(F(2.0), 0.)  # doesn't crash
+    jax.grad(g, argnums=(1,))(F(2.0), 0.)  # doesn't crash
 
-#   def test_nondiff_argnums_stop_gradient(self):
-#     # https://github.com/google/jax/issues/2784
-#     @partial(api.custom_vjp, nondiff_argnums=(0, 1))
-#     def _clip_gradient(lo, hi, x):
-#       return x  # identity function
+  def test_nondiff_argnums_stop_gradient(self):
+    # https://github.com/google/jax/issues/2784
+    @partial(api.custom_vjp, nondiff_argnums=(0, 1))
+    def _clip_gradient(lo, hi, x):
+      return x  # identity function
 
-#     def clip_gradient_fwd(lo, hi, x):
-#         # return x, None
-#         return x, (hi, )
+    def clip_gradient_fwd(lo, hi, x):
+        # return x, None
+        return x, (hi, )
 
-#     def clip_gradient_bwd(lo, hi, _, g):
-#         return (np.clip(g, lo, hi),)
+    def clip_gradient_bwd(lo, hi, _, g):
+        return (jnp.clip(g, lo, hi),)
 
-#     _clip_gradient.defvjp(clip_gradient_fwd, clip_gradient_bwd)
+    _clip_gradient.defvjp(clip_gradient_fwd, clip_gradient_bwd)
 
-#     def clip_gradient(x):
-#         lo = -1
-#         hi = x + 1  # causes things to break
-#         return _clip_gradient(lo, hi, x)
+    def clip_gradient(x):
+        lo = -1
+        hi = x + 1  # causes things to break
+        return _clip_gradient(lo, hi, x)
 
-#     jax.grad(clip_gradient)(1.)  # doesn't crash
+    jax.grad(clip_gradient)(1.)  # doesn't crash
 
 
 # TODO put back
