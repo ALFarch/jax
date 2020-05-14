@@ -69,9 +69,9 @@ def _memoize(thunk):
 
 def _initial_style_jaxpr(fun, in_avals):
   in_pvals = [pe.PartialVal.unknown(aval) for aval in in_avals]
-  jaxpr, out_pvals, consts = pe.trace_to_jaxpr(fun, in_pvals, instantiate=True,
-                                               bottom=True, stage_out=False)
-  assert not any(isinstance(c, core.Tracer) for c in consts)
+  with core.initial_style_staging():
+    jaxpr, out_pvals, consts = pe.trace_to_jaxpr(
+        fun, in_pvals, instantiate=True, stage_out=False)
   out_avals = map(raise_to_shaped, unzip2(out_pvals)[0])
   typed_jaxpr = core.TypedJaxpr(jaxpr, consts, in_avals, out_avals)
   return typed_jaxpr
@@ -263,27 +263,22 @@ def _flatten_jvp(in_tree, *args):
       raise TypeError(msg.format('\n'.join(disagreements)))
   yield primals_out + tangents_out, out_tree
 
-def _custom_jvp_call_bind(prim, fun, jvp, *args):
-  args = map(core.full_lower, args)
-  top_trace = core.find_top_trace(args)
-  level = (core.trace_state.trace_stack.next_level(True)
-           if top_trace is None else top_trace.level)
-  if top_trace is None:
-    with core.new_sublevel():
-      outs = prim.impl(fun, jvp, *args)
-  else:
-    tracers = map(top_trace.full_raise, args)
-    outs = top_trace.process_custom_jvp_call(prim, fun, jvp, tracers)
-  return map(core.full_lower, outs)
+class CustomJVPCallPrimitive(core.CallPrimitive):
+  def bind(self, fun, jvp, *args):
+    args = map(core.full_lower, args)
+    top_trace = core.find_top_trace(args)
+    if top_trace is None:
+      outs = fun.call_wrapped(*args)
+    else:
+      tracers = map(top_trace.full_raise, args)
+      outs = top_trace.process_custom_jvp_call(self, fun, jvp, tracers)
+    return map(core.full_lower, outs)
 
-def _custom_jvp_call_impl(fun, _, *args):
-  return fun.call_wrapped(*args)
+  def impl(self, fun, _, *args):
+    return fun.call_wrapped(*args)
 
-custom_jvp_call_p = core.Primitive('custom_jvp_call')
-custom_jvp_call_p.multiple_results = True
-custom_jvp_call = partial(_custom_jvp_call_bind, custom_jvp_call_p)
-custom_jvp_call_p.def_custom_bind(custom_jvp_call)
-custom_jvp_call_p.def_impl(_custom_jvp_call_impl)
+custom_jvp_call_p = CustomJVPCallPrimitive('custom_jvp_call')
+custom_jvp_call = custom_jvp_call_p.bind
 
 
 def custom_jvp_call_jaxpr(fun, jvp, *args):
@@ -509,8 +504,6 @@ def _flatten_bwd(in_tree, out_trees, *args):
 def _custom_vjp_call_bind(prim, fun, fwd, bwd, *args, out_trees):
   args = map(core.full_lower, args)
   top_trace = core.find_top_trace(args)
-  level = (core.trace_state.trace_stack.next_level(True)
-           if top_trace is None else top_trace.level)
   if top_trace is None:
     with core.new_sublevel():
       outs = prim.impl(fun, fwd, bwd, *args, out_trees=out_trees)

@@ -138,7 +138,6 @@ def unpair_pval(pval):
 
 # NOTE: The FIXMEs below are caused by primal/tangent mixups (type errors if you will)
 def backward_pass(jaxpr: core.Jaxpr, consts, primals_in, cotangents_in):
-  print(jaxpr)
   if all(ct is zero for ct in cotangents_in):
     return [zero] * len(jaxpr.invars)
 

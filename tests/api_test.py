@@ -2073,24 +2073,24 @@ class CustomJVPTest(jtu.JaxTestCase):
   def test_basic(self):
     @api.custom_jvp
     def f(x):
-      return np.sin(x)
+      return jnp.sin(x)
     def f_jvp(primals, tangents):
       x, = primals
       g, = tangents
-      return f(x), 2 * np.cos(x) * g
+      return f(x), 2 * jnp.cos(x) * g
     f.defjvp(f_jvp)
 
     x = 3.
-    self.assertAllClose(f(x), np.sin(x), check_dtypes=True)
+    self.assertAllClose(f(x), jnp.sin(x), check_dtypes=True)
     self.assertAllClose(api.jvp(f, (x,), (1.,)),
-                        (np.sin(x), 2 * np.cos(x)),
+                        (jnp.sin(x), 2 * jnp.cos(x)),
                         check_dtypes=True)
-    self.assertAllClose(api.grad(f)(x), 2 * np.cos(x), check_dtypes=True)
+    self.assertAllClose(api.grad(f)(x), 2 * jnp.cos(x), check_dtypes=True)
 
   def test_invariance(self):
     @api.custom_jvp
     def f(x):
-      return np.cos(2 * x) / 2.
+      return jnp.cos(2 * x) / 2.
     def f_jvp(primals, tangents):
       x, = primals
       g, = tangents
@@ -2114,9 +2114,9 @@ class CustomJVPTest(jtu.JaxTestCase):
     @api.custom_jvp
     def f(x):
       if x > 0:
-        return np.sin(x)
+        return jnp.sin(x)
       else:
-        return np.cos(x)
+        return jnp.cos(x)
     def f_jvp(primals, tangents):
       x, = primals
       g, = tangents
@@ -2126,13 +2126,13 @@ class CustomJVPTest(jtu.JaxTestCase):
         return f(x), 3 * g
     f.defjvp(f_jvp)
     x = 2.
-    self.assertAllClose(f(x), np.sin(x), check_dtypes=True)
-    self.assertAllClose(f(-x), np.cos(-x), check_dtypes=True)
+    self.assertAllClose(f(x), jnp.sin(x), check_dtypes=True)
+    self.assertAllClose(f(-x), jnp.cos(-x), check_dtypes=True)
     self.assertAllClose(api.jvp(f, (x,), (1.,)),
-                        (np.sin(x), 2.),
+                        (jnp.sin(x), 2.),
                         check_dtypes=False)
     self.assertAllClose(api.jvp(f, (-x,), (1.,)),
-                        (np.cos(-x), 3.),
+                        (jnp.cos(-x), 3.),
                         check_dtypes=False)
     self.assertAllClose(api.grad(f)(x), 2., check_dtypes=False)
     self.assertAllClose(api.grad(f)(-x), 3., check_dtypes=False)
@@ -2140,83 +2140,83 @@ class CustomJVPTest(jtu.JaxTestCase):
   def test_vmap(self):
     @api.custom_jvp
     def f(x):
-      assert np.ndim(x) == 0
-      return np.sin(x)
+      assert jnp.ndim(x) == 0
+      return jnp.sin(x)
     def f_jvp(primals, tangents):
       x, = primals
       g, = tangents
-      assert np.ndim(x) == np.ndim(g) == 0
-      return f(x), 2 * np.cos(x) * g
+      assert jnp.ndim(x) == jnp.ndim(g) == 0
+      return f(x), 2 * jnp.cos(x) * g
     f.defjvp(f_jvp)
 
-    x = np.arange(3.)
-    xx = np.arange(6.).reshape(2, 3)
+    x = jnp.arange(3.)
+    xx = jnp.arange(6.).reshape(2, 3)
 
     # vmap of f
-    self.assertAllClose(api.vmap(f)(x), np.sin(x), check_dtypes=True)
-    self.assertAllClose(api.vmap(api.vmap(f))(xx), np.sin(xx), check_dtypes=True)
+    self.assertAllClose(api.vmap(f)(x), jnp.sin(x), check_dtypes=True)
+    self.assertAllClose(api.vmap(api.vmap(f))(xx), jnp.sin(xx), check_dtypes=True)
 
     # vmap of jvp of f
     self.assertAllClose(api.vmap(lambda x: api.jvp(f, (x,), (x,)))(x),
-                        (np.sin(x), 2 * np.cos(x) * x),
+                        (jnp.sin(x), 2 * jnp.cos(x) * x),
                         check_dtypes=True)
     self.assertAllClose(api.vmap(api.vmap(lambda x: api.jvp(f, (x,), (x,))))(xx),
-                        (np.sin(xx), 2 * np.cos(xx) * xx),
+                        (jnp.sin(xx), 2 * jnp.cos(xx) * xx),
                         check_dtypes=True)
 
     # jvp of vmap of f
     self.assertAllClose(api.jvp(api.vmap(f), (x,), (x,)),
-                        (np.sin(x), 2 * np.cos(x) * x),
+                        (jnp.sin(x), 2 * jnp.cos(x) * x),
                         check_dtypes=True)
     self.assertAllClose(api.jvp(api.vmap(api.vmap(f)), (xx,), (xx,)),
-                        (np.sin(xx), 2 * np.cos(xx) * xx),
+                        (jnp.sin(xx), 2 * jnp.cos(xx) * xx),
                         check_dtypes=True)
 
     # vmap of jvp of vmap of f
     self.assertAllClose(api.vmap(lambda x: api.jvp(api.vmap(f), (x,), (x,)))(xx),
-                        (np.sin(xx), 2 * np.cos(xx) * xx),
+                        (jnp.sin(xx), 2 * jnp.cos(xx) * xx),
                         check_dtypes=True)
 
   def test_jit(self):
     @api.custom_jvp
     def f(x):
-      return np.sin(x)
+      return jnp.sin(x)
     def f_jvp(primals, tangents):
       x, = primals
       g, = tangents
-      return f(x), 2 * np.cos(x) * g
+      return f(x), 2 * jnp.cos(x) * g
     f.defjvp(f_jvp)
 
     x = 3.
 
     # jit
-    self.assertAllClose(api.jit(f)(x), np.sin(x), check_dtypes=True)
-    self.assertAllClose(api.jit(api.jit(f))(x), np.sin(x), check_dtypes=True)
+    self.assertAllClose(api.jit(f)(x), jnp.sin(x), check_dtypes=True)
+    self.assertAllClose(api.jit(api.jit(f))(x), jnp.sin(x), check_dtypes=True)
 
     # jit of jvp
     self.assertAllClose(api.jit(lambda x: api.jvp(f, (x,), (x,)))(x),
-                        (np.sin(x), 2 * np.cos(x) * x),
+                        (jnp.sin(x), 2 * jnp.cos(x) * x),
                         check_dtypes=False)
 
     # jvp of jit
     self.assertAllClose(api.jvp(api.jit(f), (x,), (x,)),
-                        (np.sin(x), 2 * np.cos(x) * x),
+                        (jnp.sin(x), 2 * jnp.cos(x) * x),
                         check_dtypes=False)
 
   def test_pytrees(self):
     @api.custom_jvp
     def f(x):
-      return {'b': np.sin(x['a'])}
+      return {'b': jnp.sin(x['a'])}
     def f_jvp(primals, tangents):
       x, = primals
       g, = tangents
-      return f(x), {'b': 2 * np.cos(x['a']) * g['a']}
+      return f(x), {'b': 2 * jnp.cos(x['a']) * g['a']}
     f.defjvp(f_jvp)
     x = {'a': 3.}
-    self.assertAllClose(f(x)['b'], np.sin(x['a']), check_dtypes=True)
+    self.assertAllClose(f(x)['b'], jnp.sin(x['a']), check_dtypes=True)
     self.assertAllClose(api.jvp(f, (x,), (x,)),
-                        ({'b': np.sin(x['a'])},
-                         {'b': 2 * np.cos(x['a']) * x['a']}),
+                        ({'b': jnp.sin(x['a'])},
+                         {'b': 2 * jnp.cos(x['a']) * x['a']}),
                         check_dtypes=False)
 
   def test_kwargs(self):
@@ -2229,7 +2229,7 @@ class CustomJVPTest(jtu.JaxTestCase):
       t_x, t_y, t_c = tangents
       return my_fun(x, y, c), t_c
     my_fun.defjvp(my_jvp)
-    f = lambda x, y: np.square(my_fun(x, y, c=2.)).sum()
+    f = lambda x, y: jnp.square(my_fun(x, y, c=2.)).sum()
     f(10., 5.)  # doesn't crash
     api.jvp(f, (10., 5.), (1., 1.))  # doesn't crash
 
@@ -2258,7 +2258,7 @@ class CustomJVPTest(jtu.JaxTestCase):
   def test_initial_style_vmap(self):
     @api.custom_jvp
     def f(x):
-      assert np.ndim(x) == 0
+      assert jnp.ndim(x) == 0
       return 3 * x
     def f_jvp(primals, tangents):
       x, = primals
@@ -2270,12 +2270,12 @@ class CustomJVPTest(jtu.JaxTestCase):
       out, _  = lax.scan(lambda c, _: (f(c), None), x, None, length=1)
       return out
 
-    ans = api.vmap(foo)(np.ones(3))
-    expected = 3. * np.ones(3)
+    ans = api.vmap(foo)(jnp.ones(3))
+    expected = 3. * jnp.ones(3)
     self.assertAllClose(ans, expected, check_dtypes=False)
 
-    ans = api.grad(lambda x: api.vmap(foo)(x).sum())(np.ones(3))
-    expected = 2. * np.ones(3)
+    ans = api.grad(lambda x: api.vmap(foo)(x).sum())(jnp.ones(3))
+    expected = 2. * jnp.ones(3)
     self.assertAllClose(ans, expected, check_dtypes=False)
 
   def test_closed_over_tracers_error_message(self):
@@ -2386,16 +2386,16 @@ class CustomJVPTest(jtu.JaxTestCase):
     def foo_jvp(primals, tangents):
       x, = primals
       t, = tangents
-      return f(x), np.reshape(t, (1,))
+      return f(x), jnp.reshape(t, (1,))
 
     f(2.)  # doesn't crash
     self.assertRaisesRegex(
         TypeError,
         re.escape(
             "Custom JVP rule must produce primal and tangent outputs "
-            "with equal shapes and dtypes, but got float32[] and float32[1] "
+            "with equal shapes and dtypes, but got f32[] and f32[1] "
             "respectively."),
-        lambda: api.jvp(f, (np.float32(2.),), (np.float32(1.),)))
+        lambda: api.jvp(f, (jnp.float32(2.),), (jnp.float32(1.),)))
 
   def test_jvp_rule_doesnt_return_pair_error_message(self):
     # https://github.com/google/jax/issues/2516
@@ -2440,16 +2440,16 @@ class CustomJVPTest(jtu.JaxTestCase):
     # just make sure these don't crash
     foo(3.)
     grad(foo)(3.)
-    grad(lambda x: jax.vmap(foo)(x).sum())(np.arange(3.))
+    grad(lambda x: jax.vmap(foo)(x).sum())(jnp.arange(3.))
 
   def test_hard_stuff(self):
-    arr = np.ones((5, 2, 2))
-    api.jit(jax.vmap(np.linalg.det))(arr)  # doesn't crash
+    arr = jnp.ones((5, 2, 2))
+    api.jit(jax.vmap(jnp.linalg.det))(arr)  # doesn't crash
 
   def test_hard_stuff2(self):
     @jax.custom_jvp
     def f(x):
-      return lax.tie_in(x, onp.zeros(x.shape, x.dtype))
+      return lax.tie_in(x, np.zeros(x.shape, x.dtype))
 
     @f.defjvp
     def f_jvp(primals, tangents):
@@ -2458,16 +2458,16 @@ class CustomJVPTest(jtu.JaxTestCase):
       return f(x), t
 
     # don't crash
-    jax.jit(jax.vmap(f))(np.arange(3.))
-    jax.jit(jax.vmap(jax.grad(f)))(np.arange(3.))
-    jax.jit(jax.grad(lambda x: jax.vmap(f)(x).sum()))(np.arange(3.))
-    jax.grad(lambda x: jax.vmap(f)(x).sum())(np.arange(3.))
-    jax.jvp(jax.vmap(f), (np.arange(3.),), (np.ones(3),))
+    jax.jit(jax.vmap(f))(jnp.arange(3.))
+    jax.jit(jax.vmap(jax.grad(f)))(jnp.arange(3.))
+    jax.jit(jax.grad(lambda x: jax.vmap(f)(x).sum()))(jnp.arange(3.))
+    jax.grad(lambda x: jax.vmap(f)(x).sum())(jnp.arange(3.))
+    jax.jvp(jax.vmap(f), (jnp.arange(3.),), (jnp.ones(3),))
 
   def test_hard_stuff3(self):
     @jax.custom_jvp
     def relu(x):
-      return np.maximum(x, 0)
+      return jnp.maximum(x, 0)
 
     @relu.defjvp
     def _relu_jvp(primals, tangents):
@@ -2483,11 +2483,11 @@ class CustomJVPTest(jtu.JaxTestCase):
       return c[-1]
 
     # don't crash
-    jax.jit(jax.vmap(f))(np.arange(3.))
-    jax.jit(jax.vmap(jax.grad(f)))(np.arange(3.))
-    jax.jit(jax.grad(lambda x: jax.vmap(f)(x).sum()))(np.arange(3.))
-    jax.grad(lambda x: jax.vmap(f)(x).sum())(np.arange(3.))
-    jax.jvp(jax.jit(jax.vmap(f)), (np.arange(3.),), (np.ones(3),))
+    jax.jit(jax.vmap(f))(jnp.arange(3.))
+    jax.jit(jax.vmap(jax.grad(f)))(jnp.arange(3.))
+    jax.jit(jax.grad(lambda x: jax.vmap(f)(x).sum()))(jnp.arange(3.))
+    jax.grad(lambda x: jax.vmap(f)(x).sum())(jnp.arange(3.))
+    jax.jvp(jax.jit(jax.vmap(f)), (jnp.arange(3.),), (jnp.ones(3),))
 
   def test_eval_shape(self):
     @jax.custom_jvp
@@ -2502,8 +2502,8 @@ class CustomJVPTest(jtu.JaxTestCase):
       return ans, t_out
 
     # don't crash
-    api.eval_shape(expit, np.ones((2, 3)))
-    api.eval_shape(api.grad(lambda x: expit(x).sum()), np.ones((2, 3)))
+    api.eval_shape(expit, jnp.ones((2, 3)))
+    api.eval_shape(api.grad(lambda x: expit(x).sum()), jnp.ones((2, 3)))
 
   def test_jaxpr_zeros(self):
     # from https://github.com/google/jax/issues/2657
@@ -2522,7 +2522,7 @@ class CustomJVPTest(jtu.JaxTestCase):
 
     def experiment(theta):
         def step(q, _):
-            z = f(np.eye(3), np.ones(3) * theta)
+            z = f(jnp.eye(3), jnp.ones(3) * theta)
             q += z[0]
             return q, q
 
