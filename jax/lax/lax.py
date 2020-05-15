@@ -4732,7 +4732,6 @@ def _stop_gradient_batch_rule(batched_args, batch_dims):
   dim, = batch_dims
   return stop_gradient(x), dim
 
-xla.translations[ad_util.stop_gradient_p] = lambda c, x: x
 ad.primitive_jvps[ad_util.stop_gradient_p] = _stop_gradient_jvp_rule
 batching.primitive_batchers[ad_util.stop_gradient_p] = _stop_gradient_batch_rule
 

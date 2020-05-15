@@ -188,7 +188,7 @@ class Literal(object):
 
 literalable_types: Set[type] = set()
 
-class Primitive(object):
+class Primitive:
   multiple_results = False  # set for multi-output primitives
   call_primitive = False    # set for call primitives processed in final style
   map_primitive = False     # set for map primitives processed in final style

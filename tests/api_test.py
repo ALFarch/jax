@@ -2870,18 +2870,18 @@ class CustomVJPTest(jtu.JaxTestCase):
       return x  # identity function
 
     def clip_gradient_fwd(lo, hi, x):
-        # return x, None
-        return x, (hi, )
+      # return x, None
+      return x, (hi, )
 
     def clip_gradient_bwd(lo, hi, _, g):
-        return (jnp.clip(g, lo, hi),)
+      return (jnp.clip(g, lo, hi),)
 
     _clip_gradient.defvjp(clip_gradient_fwd, clip_gradient_bwd)
 
     def clip_gradient(x):
-        lo = -1
-        hi = x + 1  # causes things to break
-        return _clip_gradient(lo, hi, x)
+      lo = -1
+      hi = x + 1  # causes things to break
+      return _clip_gradient(lo, hi, x)
 
     jax.grad(clip_gradient)(1.)  # doesn't crash
 
